@@ -1,7 +1,8 @@
 # neo4j-eventstore — specification
 
-Status: **draft for review**, rewritten 2026-09-29. It supersedes the event-store draft; that
-earlier design is in git history. The execution plan is [`plan.md`](plan.md), and every Quartz
+Status: **implemented** (2026-09-29). This repo holds the projection library; vespa-eventstore has
+the observer hook; vespa-relay has the wiring. Where building it changed a decision, the text below
+says so ("*Built:*"). It supersedes the event-store draft, which is in git history. The execution plan is [`plan.md`](plan.md), and every Quartz
 class this spec derives edges from is catalogued in
 [`appendix-providers.md`](appendix-providers.md).
 
@@ -416,7 +417,7 @@ the semantics are Quartz's. `roles` is **stored only where the row admits more t
 
 | Kinds | Tag → roles | Stored? | Quartz source |
 |---|---|---|---|
-| 1, 42, 1311, 2004, 30818, 1617, 1630–1633 | `e` → `root` / `reply` / `mention` / `fork` (NIP-10 markers; unmarked tags by the positional rule); `p` → `mention` | `e`: yes; `p`: implied | `MarkedETag.parse*`, `BaseThreadedEvent.root()` / `reply()`, `TextNoteEvent.isAFork()` |
+| 1, 42, 1311, 2004, 30818, 1617, 1630–1633 | `e` → `root` / `reply` / `mention` / `fork`. `root` is Quartz's `root()`. `reply` is the **direct parent**, Quartz's `replyingTo()`: the reply marker, else the marked root (a direct reply to the root carries only a `root` marker), else the last unmarked `e`. Following `reply` edges therefore walks a whole tree.; `p` → `mention` | `e`: yes; `p`: implied | `MarkedETag.parse*`, `BaseThreadedEvent.root()` / `reply()`, `TextNoteEvent.isAFork()` |
 | 1111, 1244 | `E` / `A` → `root`, `e` / `a` → `reply`, `P` → `root_author`, `p` → `reply_author` | implied by the letter's case | `CommentEvent.rootEventIds()` / `replyEventIds()` / … |
 | any | `q` → `quote` | implied | `QTag.parse` |
 | 6, 16 | last `e` / `a` → `repost`, others → `context`; `p` → `reposted_author` | `e` / `a`: yes | `BaseRepostEvent.boostedEventId()` / `boostedAddress()` |
@@ -473,6 +474,10 @@ interface IndexObserver {
 fun open(..., observers: List<IndexObserver> = emptyList()): VespaEventStore
 ```
 
+- *Built:* vespa-eventstore `bebbf90493`, with `IndexObserver` and `ObservedEventIndex` in
+  `engine.observe`. `:engine` cannot import the facade, and `:store` exposes `:engine` as `api`.
+  On the default engine path the decorator runs supersession through itself, so the replaced
+  version's removal IS reported. Only the atomic address-keyed path hides it.
 - **Placement.** A decorator `ObservedEventIndex` sits directly over
   `MeteredEventIndex(VespaEventIndex)`, **below** `TrustProjection`. Every event mutation any
   layer makes passes through it: the store's own, and the trust layer's supersession removals.
@@ -501,9 +506,15 @@ fun open(..., observers: List<IndexObserver> = emptyList()): VespaEventStore
   reconciler. It never blocks Vespa.
 
 A single consumer per process drains the queue in batches into `GraphIndex.apply` / `unapply`.
-Each batch is one managed write transaction: `UNWIND` rows, `MERGE` on unique keys in sorted
-order, dynamic relationship types (`CREATE (s)-[:$(row.type)]->(t)`), and driver retries on
-deadlock.
+
+*Built:* each EVENT (and each removal) is its own managed write transaction, not each batch.
+Measured on 2026.09, a statement that reads a node deleted by an earlier statement in the same
+transaction intermittently fails ("Node … has been deleted in this transaction") instead of
+skipping it. For the same reason, an apply that displaces an incumbent keeps the nodes the new
+version re-references. Edges use dynamic relationship types
+(`CREATE (s)-[:$(row.type)]->(t)`), and the driver retries on deadlock. Each apply first WRITES
+to the event node and its slot anchor (the author `:User` or the `:Address`), taking their
+locks, so two writer processes cannot both win a slot.
 
 **`apply(e)`:**
 1. Already `:Stored` → no-op (idempotent).
@@ -577,8 +588,16 @@ For a `created_at` window, the reconciler streams both sides in `(created_at, id
 - Neo4j `:Stored`.
 
 It merge-diffs them:
-- **missing** in Neo4j → `fetch` (chunks of 500) → `apply`;
-- **extra** in Neo4j → `unapply`.
+- **extra** in Neo4j → `unapply`, first;
+- **missing** in Neo4j → `fetch` (chunks of 500) → `apply` **authoritatively**.
+
+*Built:* an authoritative apply bypasses the fence and displaces a slot's incumbent whatever its
+age, because the source says the event is held now. Without it, a stale version of a slot whose
+winner sat in another window was left out forever. This covers the two residuals no local rule
+can see:
+- a remove delivered more than a fence window before its own put;
+- with unreported (atomic) supersession, a stale version delivered after its successor was
+  itself removed, so the slot looks empty.
 
 Windows are sized to about 250k ids. A 500M-id snapshot cannot be materialized; staging measured
 ~5.3 GiB for 43.7M ids.
@@ -588,6 +607,10 @@ Cadence:
 2. A rolling **recent pass**: the last 2 h, every 5 min.
 3. A continuous **full sweep** over the whole corpus, resumable from a cursor file. Its period
    (a week or better) is measured in P7.
+
+   *Built:* each tick spends a budget of source ids (250k), not a fixed span of time. An empty
+   window widens the next ×4, up to ten years. Seen live, the first tick crossed 1970 to now in
+   13 windows and backfilled an empty graph.
 
 Races are benign:
 - a missing event still in the live queue is applied twice, and the second apply is a no-op;
@@ -613,11 +636,15 @@ loader does this instead:
 2. **Dump Vespa** with `EngineReads.visitDocsPage` (all kinds). Run each event
    through the **same `EdgeDeriver`**, and write node and relationship CSVs, one file per
    relationship type.
-   - Resolve supersession duplicates with an external sort on the replaceable / addressable key.
-     The dump spans time, so an old and a new version can both appear.
-   - Deduplicate `:User` / `:Address` / `:Tag` / stub nodes.
-3. **Import** with `neo4j-admin database import full`, then run `SchemaInstaller`, which creates
-   the constraints and indexes.
+   - *Built:* the writer streams, with no in-memory dedup. `--skip-duplicate-nodes` keeps the
+     FIRST occurrence, so file order puts held events before stubs and named users before bare
+     ones.
+   - Supersession duplicates are NOT sorted out. The dump spans time, so an old and a new
+     version can both appear; the reconciler's catch-up removes the loser as an extra.
+3. **Import** with `neo4j-admin database import full neo4j …`. The database name goes first,
+   because `--relationships` swallows a trailing positional argument. Then run
+   `BulkImport.finalize()`: `SchemaInstaller`, plus `OWNED_BY` for every address, which a
+   streaming writer cannot deduplicate.
 4. **Catch up:** reconcile `[T0 − 1 day, now]` plus the dirty hours. Then let the full sweep run,
    which also removes anything the dump caught mid-change.
 
@@ -651,8 +678,10 @@ or URLs through `LOAD CSV`. Protection has to be layered around the query:
    Inspecting the plan defeats comment, casing and unicode tricks.
 2. **Execute in a read transaction** (`AccessMode.READ`, `executeRead`) on the data database.
 3. **Server configuration**, asserted at boot (the service refuses to start if unsafe):
-   - `dbms.security.procedures.allowlist` = the same list;
-   - no APOC / GDS plugins;
+   - no plugin FUNCTIONS (`SHOW FUNCTIONS … WHERE NOT isBuiltIn`). A function runs inside any
+     expression, where the procedure allowlist cannot see it. *Built:* the 2026.09 image ships
+     `fleetManagement.*` procedures. They are unreachable past the guard's allowlist, so
+     procedures are not what the boot check asserts;
    - `dbms.security.allow_csv_import_from_file_urls=false`, with no import directory.
 4. **No resource limits in v1.** There are no timeouts, row, byte or memory caps, and no
    concurrency or rate limits. A heavy query runs to completion and can slow the projector. The

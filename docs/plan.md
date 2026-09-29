@@ -3,6 +3,17 @@
 Companion to [`spec.md`](spec.md); section references (§) point there. It was rewritten
 2026-09-29 for the graph-projection design.
 
+**Status (2026-09-29):** P0–P6, V1 and R1–R8 are built and green:
+- 56 unit tests, and the Neo4j integration gate (`ProjectionIT`, `CypherGuardIT`,
+  `ReferenceQueriesIT`, `BulkImportIT`);
+- vespa-relay's build, with `relay/tools/graph-e2e.mjs` passing 20/20 against a real Vespa,
+  Neo4j and relay;
+- the reconciler repairing deliberate sabotage, and backfilling an empty graph in its first
+  tick.
+
+Open: **P7** (the scale study), **R9** (the production rollout) and **P8** (limits and the rest).
+Where building changed the design, spec.md says so under "*Built:*".
+
 Each phase has a deliverable and an **exit gate** that must be green before the next phase
 depends on it. Work is tagged by repository:
 - **[N]** this repo
