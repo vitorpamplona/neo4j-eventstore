@@ -36,8 +36,7 @@ Production today: **500M events, 62M pubkeys.**
 
 **Goals**
 
-1. **An exact projection of Vespa's stored set.** The projection is filtered by a kind policy
-   (§4.4). Every add and every removal Vespa makes appears in Neo4j:
+1. **An exact projection of Vespa's stored set, all kinds included** (§4.4). Every add and every removal Vespa makes appears in Neo4j:
    - supersession;
    - NIP-09 deletion;
    - NIP-62 vanish;
@@ -132,12 +131,12 @@ in both of its writer processes, relay and sync.
   what it erased. It would also break the relay's `as? VespaEventStore` casts.
 - *Fallback, if the hook is refused:* §6.4.
 
-**D3 — A kind and tag policy decides what is worth holding** (§4.4).
-- DM metadata (kinds 4, 1059, 21059) is excluded by default, because Cypher would make "who
-  messages whom" trivial to mine.
-- Bulky kinds with no references can be excluded, from measured per-kind counts.
-- Single-letter tags that are not references become `:Tag` nodes only for an allowlist of names,
-  e.g. `t`, but not `x` file hashes.
+**D3 — Every kind is projected, and a tag policy decides which non-reference tags become
+nodes** (§4.4).
+- All event kinds Vespa holds are kept, DMs and gift wraps included.
+- Single-letter tags that are not references become `:Tag` nodes only for an allowlist of names:
+  `t`, for example, but not `x` file hashes, which would add one useless node per event.
+- A kind exclude list exists as an operator knob, **empty by default**.
 
 **Modules** (repo `neo4j-eventstore`; a rename is open question Q5):
 
@@ -180,7 +179,7 @@ by the plan's P7 measurement on a staging slice.
 
 | Item | Estimate | Basis |
 |---|---|---|
-| `:Event` nodes | ≤ 500M | Minus excluded kinds (§4.4), plus stubs for referenced-but-absent events |
+| `:Event` nodes | 500M | Every kind (§4.4), plus stubs for referenced-but-absent events |
 | `:User` nodes | 62M | One per pubkey that authored or was referenced |
 | `:Address` / `:Tag` nodes | tens of millions | Addressables plus referenced replaceables only (§4.1); allowlisted tag names only |
 | Relationships | **3–6B** | 500M `by_<k>` edges, plus references (~1–2B), plus current follow lists (≈10–20M lists × a few hundred `p_3` each) |
@@ -210,7 +209,7 @@ Consequences:
 
 | Label | Key (unique constraint) | Properties | Exists when |
 |---|---|---|---|
-| `:Event:Stored` | `id` | `kind`, `created_at`, `d` (addressables), `expires_at` (NIP-40), curated values (§4.3) | Vespa holds the event and the kind policy admits it |
+| `:Event:Stored` | `id` | `kind`, `created_at`, `d` (addressables), `expires_at` (NIP-40), curated values (§4.3) | Vespa holds the event |
 | `:Event` (stub) | `id` | none | Something references an id we do not hold (never seen, excluded, or removed) |
 | `:User` | `pubkey` | curated values from kind 0 (§4.3) | It authored, or was referenced |
 | `:Address` | `id` = `kind:pubkey:d` (Quartz `AddressSerializer` form) | `kind`, `pubkey`, `d` | Any **addressable** event (30000–39999), or a reference to any address, including a replaceable one such as `10002:<pk>:` |
@@ -307,15 +306,14 @@ full reconcile pass, or by a targeted backfill.
 ### 4.4 Kind and tag policy (`schema/GraphPolicy`)
 
 The policy is configuration, not schema. Its hash is stored in `:Meta`. A changed policy makes
-the reconciler converge the graph to the new filter:
-- a newly excluded kind is unapplied;
-- a newly included kind is copied from Vespa.
+the reconciler converge the graph to the new filter.
 
-- **Kinds.** An exclude list over "everything Vespa holds".
-  - The default excludes **4, 1059, 21059** (DM metadata; D3).
-  - Ephemeral kinds never reach Vespa.
-  - Further candidates are chosen from vespa-relay's per-kind counts, e.g. 30078 app data and
-    other unreferenced bulk, rather than guessed.
+- **Kinds: all of them.** Every kind Vespa holds is projected. Ephemeral kinds never reach
+  Vespa.
+  - An exclude list exists as an operator knob. It is **empty by default**, and nothing in the
+    design depends on using it.
+  - If it is ever used, the reconciler unapplies a newly excluded kind and copies a newly
+    included one from Vespa.
 - **Tag nodes.** An allowlist of single-letter names that become `:Tag` nodes when their value
   is not a reference. The default is **`t` (hashtags), `i` (NIP-73 external ids), `k`, `l` /
   `L` (labels), `r`, `g`**.
@@ -497,7 +495,7 @@ fun open(..., observers: List<IndexObserver> = emptyList()): VespaEventStore
 ### 6.2 The projector (`feed/GraphProjector`)
 
 `GraphFeed` implements `IndexObserver`:
-- it drops excluded kinds (§4.4);
+- it drops any kind on the exclude list (§4.4; empty by default);
 - it enqueues into a bounded in-memory queue;
 - on overflow it drops the entry and marks that entry's `created_at` hour **dirty** for the
   reconciler. It never blocks Vespa.
@@ -612,7 +610,7 @@ At 500M events, online `apply` is the wrong tool for the initial load. The plan'
 loader does this instead:
 
 1. **Start the feed first** (with the graph empty, it only marks hours dirty), and note `T0`.
-2. **Dump Vespa** with `EngineReads.visitDocsPage`, excluding policy kinds. Run each event
+2. **Dump Vespa** with `EngineReads.visitDocsPage` (all kinds). Run each event
    through the **same `EdgeDeriver`**, and write node and relationship CSVs, one file per
    relationship type.
    - Resolve supersession duplicates with an external sort on the replaceable / addressable key.
@@ -684,8 +682,17 @@ label:
 ### 8.4 What callers see
 
 Everything the projection holds, ungated by the relay's observer lens or trust floor. The
-NIP-85 rank on `d_30382` edges lets a *query* apply a trust filter itself. DM metadata is not
-there to see (§4.4).
+NIP-85 rank on `d_30382` edges lets a *query* apply a trust filter itself.
+
+**DM metadata is included**, because every kind is projected (§4.4):
+- kind-4 DMs carry sender and recipient in the clear;
+- gift wraps (1059) carry their recipient `p`.
+
+In the graph that becomes `by_4` / `p_4` and `p_1059` edges, and a single query can turn them
+into a "who messages whom" graph. The relay already serves the same events by REQ, so nothing
+new is exposed, but bulk analysis becomes trivial. This is one more reason the Cypher audience
+starts at `admin` (Q4). The kind exclude list (§4.4) is the lever if that ever needs to
+change.
 
 ### 8.5 Hostile-query battery (`CypherGuardIT`)
 
@@ -833,7 +840,7 @@ RETURN n, count(DISTINCT r) AS reactors ORDER BY reactors DESC;
 | # | Question | Recommendation |
 |---|---|---|
 | Q1 | Add the observer hook to vespa-eventstore (D2), or use the relay-side fallback (§6.4)? | **Hook.** It is exact, generic, and the pattern the store already uses internally. |
-| Q2 | Final kind exclusions beyond DM metadata | Decide from vespa-relay's per-kind counts before the bulk import |
+| Q2 | Kinds | **Decided: keep all kinds.** The exclude-list knob stays, empty. |
 | Q3 | Neo4j host size | Decide from P7: page-cache fit vs query latency on the staging slice |
 | Q4 | Cypher audience (`admin` / `auth` / `public`) | **`admin` until limits exist**, then widen |
 | Q5 | Repo, group and package name. It is no longer an event store. | e.g. `nostr-graph` / `com.vitorpamplona.nostr.graph` |

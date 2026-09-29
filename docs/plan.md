@@ -31,7 +31,6 @@ P0 decisions + upstream ──▶ P1 scaffold ──▶ P2 derivation ──▶ 
 |---|---|---|---|
 | Q1 | Observer hook in vespa-eventstore vs the relay-side fallback | hook | V1 |
 | Q5 | Repo, group and package name | rename, e.g. `nostr-graph` | P1 |
-| Q2 | Extra kind exclusions | from per-kind counts | P6 |
 | Q3 / Q6 | Host size; id encoding | from P7 | R5 |
 | Q4 | Cypher audience | `admin` first | R6 |
 
@@ -109,7 +108,8 @@ This phase is pure Kotlin. It is the heart of the schema.
 - `schema/`:
   - label and type-name builders (`by_<k>`, `<t>_<k>`, `ref_<f>_<k>`, `_other`);
   - `KindRegistry` (Quartz `isKnownKind`, versioned);
-  - `GraphPolicy` (the kind exclude list, the `:Tag` allowlist, a 256-byte cap, and a hash).
+  - `GraphPolicy` (the `:Tag` allowlist, a 256-byte cap, an optional kind exclude list that is
+    empty by default, and a hash).
 - `derive/`:
   - `EdgeDeriver`, implementing spec §5 steps 1–3;
   - `LinkRules` (NIP-85 `d` subjects, 10040 services, the 9735 sender, repost embeds, **nsec
@@ -258,12 +258,11 @@ Staging is read-only: it is a data source, never a test gate.
    - result sizes;
    - memory and run time of heavy Cypher shapes;
    - how much a heavy query slows the projector.
-5. **Measure the alternatives:** compact ids (Q6), and the effect of each exclusion candidate
-   (Q2).
+5. **Measure the alternative** id encoding (Q6), and the per-kind share of nodes, relationships
+   and bytes, so the size of each kind in the all-kinds graph is known.
 6. **Extrapolate to 500M events / 62M pubkeys**, and decide:
    - Q3 (host RAM and disk);
    - Q6;
-   - Q2;
    - the full-sweep period.
 
 **Exit:** a `benchmark/README.md` "Scale" section with the measurements and the decisions.
@@ -282,7 +281,7 @@ Staging is read-only: it is a data source, never a test gate.
 | **R6** | **Endpoints and health.** `POST /graph/cypher` behind `GRAPH_CYPHER` (`admin` reuses `AdminGate` / `Nip98AdminGate` against `RELAY_ADMIN_PUBKEYS`; `auth` accepts any valid NIP-98 signature). `GET /graph/schema`. Audit to `.audit/graph-cypher/`. A `graph` block in `/stats.json` / pulse (spec §9) and a status card. |
 | **R7** | **`GraphProjectionIT`** (Vespa + Neo4j containers): the relay's ingest with injected drops and a Neo4j pause → equal id sets after one reconcile, and client `OK` latency unaffected while Neo4j is paused. |
 | **R8** | **Docs:** `docs/decisions/graph-projection.md` (D1–D3), and the runbook in `docs/operations.md` (bulk load, reset, "reconcile reports N extra", policy change). A trap line in AGENTS.md: "the graph is a projection; never write to Neo4j directly". |
-| **R9** | **Production rollout.** (a) Settle Q2 from per-kind counts. (b) Turn the projection `on` against an empty graph; note `T0`. (c) Run `graphDump` from production Vespa (500M events), then `neo4j-admin import`. (d) Catch-up reconcile. (e) Hold until the recent pass reports 0 missing / 0 extra for 7 consecutive days, one full sweep has completed clean, and the queue never overflowed. (f) `GRAPH_CYPHER=admin`. |
+| **R9** | **Production rollout.** (a) Turn the projection `on` against an empty graph; note `T0`. (b) Run `graphDump` from production Vespa (500M events), then `neo4j-admin import`. (c) Catch-up reconcile. (d) Hold until the recent pass reports 0 missing / 0 extra for 7 consecutive days, one full sweep has completed clean, and the queue never overflowed. (e) `GRAPH_CYPHER=admin`. |
 
 **Exit:** production answers T1–T12 over the full graph, and the projection has held zero
 drift for a week.
@@ -306,12 +305,12 @@ drift for a week.
 | Risk | Likelihood | Mitigation |
 |---|---|---|
 | vespa-eventstore declines or delays the observer hook | Low–Medium | The fallback in spec §6.4 (relay-side accepted-event feed plus local NIP-09/62) keeps the project unblocked. The reconciler bounds the extra drift. |
-| The initial load of 500M events takes too long or runs out of disk | Medium | Offline bulk import. P7 measures bytes per event. Kind exclusions (Q2). The id encoding (Q6). |
+| The initial load of 500M events takes too long or runs out of disk | Medium | Offline bulk import. P7 measures bytes per event and per kind. The id encoding (Q6). |
 | The page cache cannot hold the hot set, so queries are disk-bound | High at the full scale on modest hardware | A dedicated host sized from P7. Kind-typed relationships keep expansions narrow even when cold. |
 | Hub-node write contention (popular pubkeys) | Medium | Sorted-key batches and driver retries, measured in P4 and P7. |
 | **Heavy Cypher starves the projector (accepted in v1: no limits)** | Medium | The audience starts at `admin`. The reconciler repairs drift after the load passes. Limits arrive in P8 from measurements. |
 | Raw Cypher used to write, read files or reach internal URLs (Community has no RBAC) | High without guards | The layered `CypherGuard` plus server settings, with `CypherGuardIT` as a CI gate. |
-| Bulk DM-metadata mining | Medium | Kinds 4, 1059 and 21059 are excluded by default (D3). |
+| Bulk DM-metadata mining (kinds 4 and 1059 are projected, so senders and recipients are queryable) | Medium | The Cypher audience starts at `admin` (Q4). The kind exclude list is available if that ever needs to change (spec §8.4). |
 | A private-key leak via `nsec` in content | Certain without the rule | The deriver's exclusion, an invariant test, and the upstream Quartz fix. |
 | The public schema changes and breaks users' queries | Medium | `docs/schema.md`, `GET /graph/schema`, semantic versioning, and migration notes. |
 | A Quartz pin bump changes provider output | Medium | Appendix-driven golden tests turn red. `KindRegistryMigration`. |
