@@ -20,6 +20,7 @@
  */
 package com.vitorpamplona.neo4j.eventstore.reconcile
 
+import com.vitorpamplona.neo4j.eventstore.engine.GraphDump
 import com.vitorpamplona.neo4j.eventstore.engine.GraphIndex
 import com.vitorpamplona.neo4j.eventstore.engine.memory.InMemoryGraphIndex
 import com.vitorpamplona.neo4j.eventstore.sim.GraphCorpus
@@ -29,6 +30,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.fail
 
 /**
  * The projection's central property (spec §6–§7): whatever order the two writer feeds deliver
@@ -50,8 +52,8 @@ class MirrorReconcilerTest {
     }
 
     private fun assertSameGraph(
-        expected: com.vitorpamplona.neo4j.eventstore.engine.GraphDump,
-        actual: com.vitorpamplona.neo4j.eventstore.engine.GraphDump,
+        expected: GraphDump,
+        actual: GraphDump,
         message: String,
     ) {
         if (expected == actual) return
@@ -63,7 +65,7 @@ class MirrorReconcilerTest {
                 (expected.edges - actual.edges).take(5).forEach { appendLine("  missing edge $it") }
                 (actual.edges - expected.edges).take(5).forEach { appendLine("  extra edge   $it") }
             }
-        kotlin.test.fail(diff)
+        fail(diff)
     }
 
     private suspend fun freshProjection(source: SimulatedSource) =

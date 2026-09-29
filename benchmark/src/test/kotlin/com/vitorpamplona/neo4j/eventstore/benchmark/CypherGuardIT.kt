@@ -31,6 +31,7 @@ import com.vitorpamplona.neo4j.eventstore.sim.GraphCorpus
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Tag
 import org.neo4j.driver.Driver
+import org.neo4j.driver.SessionConfig
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue

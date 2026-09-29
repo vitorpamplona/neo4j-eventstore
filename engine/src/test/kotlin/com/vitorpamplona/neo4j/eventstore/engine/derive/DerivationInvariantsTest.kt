@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.derive
 import com.vitorpamplona.neo4j.eventstore.engine.Fixtures.event
 import com.vitorpamplona.neo4j.eventstore.engine.Fixtures.hex
 import com.vitorpamplona.neo4j.eventstore.engine.schema.GraphPolicy
+import com.vitorpamplona.quartz.nip01Core.core.Event
 import com.vitorpamplona.quartz.nip01Core.core.hexToByteArray
 import com.vitorpamplona.quartz.nip19Bech32.toNsec
 import com.vitorpamplona.quartz.utils.EventFactory
@@ -51,7 +52,7 @@ class DerivationInvariantsTest {
     private fun randomEvent(
         random: Random,
         kind: Int,
-    ): Pair<com.vitorpamplona.quartz.nip01Core.core.Event, String> {
+    ): Pair<Event, String> {
         val secret = hex("secret${random.nextInt()}")
         val tags =
             (0 until random.nextInt(0, 12)).map {

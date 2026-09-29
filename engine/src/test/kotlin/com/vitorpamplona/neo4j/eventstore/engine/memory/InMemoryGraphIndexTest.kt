@@ -29,6 +29,7 @@ import com.vitorpamplona.neo4j.eventstore.engine.schema.Labels
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -100,7 +101,7 @@ class InMemoryGraphIndexTest {
 
             graph.unapply(listOf(v2.id))
             val dump = graph.dump()
-            kotlin.test.assertNotNull(dump.node(Labels.ADDRESS, address), "the quote still points at the address")
+            assertNotNull(dump.node(Labels.ADDRESS, address), "the quote still points at the address")
             assertTrue(dump.edges.any { it.type == "OWNED_BY" && it.fromKey == address && it.toKey == BOB })
         }
 

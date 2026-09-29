@@ -21,6 +21,7 @@
 package com.vitorpamplona.neo4j.eventstore.cypher
 
 import com.vitorpamplona.neo4j.eventstore.engine.schema.Labels
+import com.vitorpamplona.quartz.nip01Core.core.Event
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -194,7 +195,7 @@ class CypherService(
  * JavaScript client silently rounds them.
  */
 class ResultEncoder(
-    private val events: Map<String, com.vitorpamplona.quartz.nip01Core.core.Event>?,
+    private val events: Map<String, Event>?,
 ) {
     fun encode(value: Any?): JsonElement =
         when (value) {
