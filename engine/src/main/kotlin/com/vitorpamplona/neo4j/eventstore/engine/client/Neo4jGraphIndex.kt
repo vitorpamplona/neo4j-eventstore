@@ -1,0 +1,562 @@
+/*
+ * Copyright (c) 2026 Vitor Pamplona
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy of
+ * this software and associated documentation files (the "Software"), to deal in
+ * the Software without restriction, including without limitation the rights to use,
+ * copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the
+ * Software, and to permit persons to whom the Software is furnished to do so,
+ * subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+ * FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+ * COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+ * AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+ * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
+package com.vitorpamplona.neo4j.eventstore.engine.client
+
+import com.vitorpamplona.neo4j.eventstore.engine.ApplyOutcome
+import com.vitorpamplona.neo4j.eventstore.engine.EdgeRow
+import com.vitorpamplona.neo4j.eventstore.engine.EdgeView
+import com.vitorpamplona.neo4j.eventstore.engine.GraphDump
+import com.vitorpamplona.neo4j.eventstore.engine.GraphIndex
+import com.vitorpamplona.neo4j.eventstore.engine.NodeView
+import com.vitorpamplona.neo4j.eventstore.engine.derive.AddressKey
+import com.vitorpamplona.neo4j.eventstore.engine.derive.EdgeDeriver
+import com.vitorpamplona.neo4j.eventstore.engine.derive.Extractors
+import com.vitorpamplona.neo4j.eventstore.engine.derive.GraphDoc
+import com.vitorpamplona.neo4j.eventstore.engine.derive.NodeKind
+import com.vitorpamplona.neo4j.eventstore.engine.derive.Slot
+import com.vitorpamplona.neo4j.eventstore.engine.derive.wins
+import com.vitorpamplona.neo4j.eventstore.engine.memory.InMemoryGraphIndex
+import com.vitorpamplona.neo4j.eventstore.engine.schema.Labels
+import com.vitorpamplona.neo4j.eventstore.engine.schema.RelTypes
+import com.vitorpamplona.quartz.nip01Core.core.Event
+import com.vitorpamplona.quartz.nip01Core.store.IdAndTime
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import org.neo4j.driver.Driver
+import org.neo4j.driver.SessionConfig
+import org.neo4j.driver.TransactionContext
+import org.neo4j.driver.Value
+
+/**
+ * [GraphIndex] over a Neo4j server, reached through the Apache-2.0 driver only (the server is
+ * GPLv3 and is never linked). `ProjectionIT` holds it to [InMemoryGraphIndex]'s [dump]s.
+ *
+ * Every event is applied in the batch's single managed write transaction, and the driver
+ * retries the whole callback on a transient failure (a deadlock between the two writer
+ * processes on a hub node, say) — so every step here is written to be safe to re-run.
+ *
+ * CONCURRENCY. Two processes apply at once, so check-then-write must hold a lock: each apply
+ * first WRITES to the nodes its decision depends on — the event node (duplicates, the fence) and
+ * the slot's anchor, the author `:User` or the `:Address` (supersession) — which takes their
+ * exclusive locks until commit. A competing transaction on the same slot then waits and sees the
+ * winner.
+ */
+class Neo4jGraphIndex(
+    private val driver: Driver,
+    private val database: String = SchemaInstaller.DEFAULT_DATABASE,
+    private val deriver: EdgeDeriver = EdgeDeriver(),
+    private val fenceSeconds: Long = InMemoryGraphIndex.DEFAULT_FENCE_SECONDS,
+    private val nowSecs: () -> Long = { System.currentTimeMillis() / 1000 },
+) : GraphIndex {
+    // One writer per process at a time: the feed consumer and the reconciler would otherwise
+    // deadlock each other on the same hubs for no gain.
+    private val writeLock = Mutex()
+
+    private fun config() = SessionConfig.forDatabase(database)
+
+    override suspend fun apply(
+        events: List<Event>,
+        authoritative: Boolean,
+    ): ApplyOutcome {
+        if (events.isEmpty()) return ApplyOutcome()
+        val docs =
+            events.map { event ->
+                if (!deriver.policy.admits(event.kind)) null else deriver.derive(event)
+            }
+        return writeLock.withLock {
+            withContext(Dispatchers.IO) {
+                driver.session(config()).use { session ->
+                    session.executeWrite { tx ->
+                        var outcome = ApplyOutcome(excluded = docs.count { it == null })
+                        for (doc in docs) if (doc != null) outcome += applyOne(tx, doc, authoritative)
+                        outcome
+                    }
+                }
+            }
+        }
+    }
+
+    private fun applyOne(
+        tx: TransactionContext,
+        doc: GraphDoc,
+        authoritative: Boolean,
+    ): ApplyOutcome {
+        // Lock the event node (creating it as a stub if new) and read its state.
+        val state =
+            tx
+                .run(
+                    """
+                    MERGE (e:${Labels.EVENT} {${Labels.EVENT_KEY}: ${'$'}id})
+                    SET e.__lock = true REMOVE e.__lock
+                    WITH e
+                    OPTIONAL MATCH (r:${Labels.REMOVED} {id: ${'$'}id})
+                    RETURN e:${Labels.STORED} AS stored, r.at AS removedAt
+                    """.trimIndent(),
+                    mapOf("id" to doc.id),
+                ).single()
+        if (state["stored"].asBoolean()) return ApplyOutcome(duplicate = 1)
+        if (!authoritative && !state["removedAt"].isNull && state["removedAt"].asLong() >= nowSecs() - fenceSeconds) {
+            dropIfOrphan(tx, NodeKind.EVENT, doc.id)
+            return ApplyOutcome(fenced = 1)
+        }
+
+        val incumbent = lockSlotAndFindIncumbent(tx, doc)
+        if (incumbent != null) {
+            if (!authoritative && wins(incumbent.second, incumbent.first, doc.createdAt, doc.id)) {
+                dropIfOrphan(tx, NodeKind.EVENT, doc.id)
+                cleanupSlotAnchor(tx, doc)
+                return ApplyOutcome(stale = 1)
+            }
+            unapplyStored(tx, incumbent.first)
+        }
+        write(tx, doc)
+        tx.run("MATCH (r:${Labels.REMOVED} {id: \$id}) DELETE r", mapOf("id" to doc.id)).consume()
+        return ApplyOutcome(applied = 1)
+    }
+
+    /** Locks the slot's anchor node and returns the incumbent's (id, created_at), if any. */
+    private fun lockSlotAndFindIncumbent(
+        tx: TransactionContext,
+        doc: GraphDoc,
+    ): Pair<String, Long>? =
+        when (val slot = doc.slot) {
+            is Slot.Replaceable -> {
+                val type = safe(slot.authorType)
+                tx
+                    .run(
+                        """
+                        MERGE (u:${Labels.USER} {${Labels.USER_KEY}: ${'$'}pk})
+                        SET u.__lock = true REMOVE u.__lock
+                        WITH u
+                        OPTIONAL MATCH (u)<-[:$type]-(old:${Labels.STORED})
+                        WHERE old.kind = ${'$'}kind AND old.${Labels.EVENT_KEY} <> ${'$'}id
+                        RETURN old.${Labels.EVENT_KEY} AS id, old.created_at AS createdAt
+                        """.trimIndent(),
+                        mapOf("pk" to slot.pubkey, "kind" to slot.kind.toLong(), "id" to doc.id),
+                    ).list()
+                    .firstOrNull { !it["id"].isNull }
+                    ?.let { it["id"].asString() to it["createdAt"].asLong() }
+            }
+
+            is Slot.Addressable -> {
+                val key = AddressKey.parse(slot.address)
+                tx
+                    .run(
+                        """
+                        MERGE (a:${Labels.ADDRESS} {${Labels.ADDRESS_KEY}: ${'$'}address})
+                        ON CREATE SET a.kind = ${'$'}kind, a.pubkey = ${'$'}pubkey, a.d = ${'$'}d
+                        SET a.__lock = true REMOVE a.__lock
+                        WITH a
+                        OPTIONAL MATCH (a)<-[:${RelTypes.VERSION_OF}]-(old:${Labels.STORED})
+                        WHERE old.${Labels.EVENT_KEY} <> ${'$'}id
+                        RETURN old.${Labels.EVENT_KEY} AS id, old.created_at AS createdAt
+                        """.trimIndent(),
+                        mapOf(
+                            "address" to slot.address,
+                            "kind" to (key?.kind ?: -1).toLong(),
+                            "pubkey" to (key?.pubkey ?: ""),
+                            "d" to (key?.d ?: ""),
+                            "id" to doc.id,
+                        ),
+                    ).list()
+                    .firstOrNull { !it["id"].isNull }
+                    ?.let { it["id"].asString() to it["createdAt"].asLong() }
+            }
+
+            null -> {
+                null
+            }
+        }
+
+    // A skipped apply may have just MERGEd its slot anchor into existence; leave no orphan.
+    private fun cleanupSlotAnchor(
+        tx: TransactionContext,
+        doc: GraphDoc,
+    ) {
+        when (val slot = doc.slot) {
+            is Slot.Replaceable -> dropIfOrphan(tx, NodeKind.USER, slot.pubkey)
+            is Slot.Addressable -> dropAddressIfOrphan(tx, slot.address)?.let { dropIfOrphan(tx, NodeKind.USER, it) }
+            null -> Unit
+        }
+    }
+
+    private fun write(
+        tx: TransactionContext,
+        doc: GraphDoc,
+    ) {
+        tx
+            .run(
+                "MATCH (e:${Labels.EVENT} {${Labels.EVENT_KEY}: \$id}) SET e:${Labels.STORED}, e += \$props",
+                mapOf("id" to doc.id, "props" to InMemoryGraphIndex.eventProps(doc)),
+            ).consume()
+
+        val byKind = doc.edges.groupBy { it.target.kind }
+        for ((kind, edges) in byKind) {
+            val rows =
+                edges.map { edge ->
+                    require(RelTypes.isSafe(edge.type)) { "unsafe relationship type ${edge.type}" }
+                    val row = HashMap<String, Any>()
+                    row["key"] = edge.target.key
+                    row["type"] = edge.type
+                    row["props"] = edge.props
+                    when (kind) {
+                        NodeKind.TAG -> {
+                            row["name"] = edge.target.key.substringBefore(':')
+                            row["value"] = edge.target.key.substringAfter(':')
+                        }
+
+                        NodeKind.ADDRESS -> {
+                            val key = AddressKey.parse(edge.target.key)
+                            row["kind"] = (key?.kind ?: -1).toLong()
+                            row["pubkey"] = key?.pubkey ?: ""
+                            row["d"] = key?.d ?: ""
+                        }
+
+                        else -> {
+                            Unit
+                        }
+                    }
+                    row
+                }
+            val merge =
+                when (kind) {
+                    NodeKind.EVENT -> {
+                        "MERGE (t:${Labels.EVENT} {${Labels.EVENT_KEY}: row.key})"
+                    }
+
+                    NodeKind.USER -> {
+                        "MERGE (t:${Labels.USER} {${Labels.USER_KEY}: row.key})"
+                    }
+
+                    NodeKind.TAG -> {
+                        "MERGE (t:${Labels.TAG} {${Labels.TAG_KEY}: row.key}) " +
+                            "ON CREATE SET t.name = row.name, t.value = row.value"
+                    }
+
+                    NodeKind.ADDRESS -> {
+                        "MERGE (t:${Labels.ADDRESS} {${Labels.ADDRESS_KEY}: row.key}) " +
+                            "ON CREATE SET t.kind = row.kind, t.pubkey = row.pubkey, t.d = row.d " +
+                            "WITH e, t, row " +
+                            "CALL (t, row) { WITH t, row WHERE row.pubkey <> '' " +
+                            "MERGE (o:${Labels.USER} {${Labels.USER_KEY}: row.pubkey}) MERGE (t)-[:${RelTypes.OWNED_BY}]->(o) }"
+                    }
+                }
+            tx
+                .run(
+                    "MATCH (e:${Labels.EVENT} {${Labels.EVENT_KEY}: \$id}) UNWIND \$rows AS row $merge " +
+                        "WITH e, t, row CREATE (e)-[r:\$(row.type)]->(t) SET r = row.props",
+                    mapOf("id" to doc.id, "rows" to rows),
+                ).consume()
+        }
+
+        doc.authorProps?.let { values ->
+            tx
+                .run(
+                    "MATCH (u:${Labels.USER} {${Labels.USER_KEY}: \$pk}) " +
+                        Extractors.USER_FIELDS.joinToString(" ") { "SET u.$it = null" } + " SET u += \$props",
+                    mapOf("pk" to doc.pubkey, "props" to values),
+                ).consume()
+        }
+    }
+
+    override suspend fun unapply(ids: List<String>) {
+        if (ids.isEmpty()) return
+        writeLock.withLock {
+            withContext(Dispatchers.IO) {
+                driver.session(config()).use { session ->
+                    session.executeWrite { tx ->
+                        val now = nowSecs()
+                        for (id in ids) {
+                            unapplyStored(tx, id)
+                            tx.run("MERGE (r:${Labels.REMOVED} {id: \$id}) SET r.at = \$now", mapOf("id" to id, "now" to now)).consume()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /** Strips a held event to a stub (or deletes it) and drops every node left unreferenced. */
+    private fun unapplyStored(
+        tx: TransactionContext,
+        id: String,
+    ) {
+        // Lock, and learn what the event owned: its kind (kind 0 owns its author's names).
+        val kind =
+            tx
+                .run(
+                    "MATCH (e:${Labels.EVENT}:${Labels.STORED} {${Labels.EVENT_KEY}: \$id}) " +
+                        "SET e.__lock = true REMOVE e.__lock RETURN e.kind AS kind",
+                    mapOf("id" to id),
+                ).list()
+                .firstOrNull()
+                ?.get("kind")
+                ?.asLong() ?: return
+        if (kind == 0L) {
+            tx
+                .run(
+                    "MATCH (e:${Labels.EVENT} {${Labels.EVENT_KEY}: \$id})-[b]->(u:${Labels.USER}) " +
+                        "WHERE type(b) STARTS WITH '${RelTypes.AUTHOR_PREFIX}' " +
+                        Extractors.USER_FIELDS.joinToString(" ") { "SET u.$it = null" },
+                    mapOf("id" to id),
+                ).consume()
+        }
+        val targets =
+            tx
+                .run(
+                    """
+                    MATCH (e:${Labels.EVENT}:${Labels.STORED} {${Labels.EVENT_KEY}: ${'$'}id})
+                    OPTIONAL MATCH (e)-[r]->(t)
+                    WITH e, collect(r) AS rels, collect(DISTINCT t) AS targets
+                    FOREACH (x IN rels | DELETE x)
+                    REMOVE e:${Labels.STORED}
+                    SET e = {${Labels.EVENT_KEY}: ${'$'}id}
+                    WITH e, targets
+                    CALL (e) { WITH e WHERE NOT EXISTS { (e)<--() } DELETE e }
+                    UNWIND targets AS t
+                    RETURN labels(t) AS labels,
+                           coalesce(t.${Labels.EVENT_KEY}, t.${Labels.USER_KEY}, t.${Labels.TAG_KEY}) AS key
+                    """.trimIndent(),
+                    mapOf("id" to id),
+                ).list()
+                .map { primaryKind(it["labels"].asList { v -> v.asString() }) to it["key"].asString() }
+
+        // Non-users first (an address takes its OWNED_BY with it), then users, so each check
+        // runs after every edge that could have kept it alive is gone.
+        val users = HashSet<String>()
+        for ((k, key) in targets) {
+            when (k) {
+                NodeKind.USER -> users += key
+                NodeKind.ADDRESS -> dropAddressIfOrphan(tx, key)?.let { users += it }
+                else -> dropIfOrphan(tx, k, key)
+            }
+        }
+        users.forEach { dropIfOrphan(tx, NodeKind.USER, it) }
+    }
+
+    private fun dropIfOrphan(
+        tx: TransactionContext,
+        kind: NodeKind,
+        key: String,
+    ) {
+        val (label, prop) = labelAndKey(kind)
+        val condition =
+            when (kind) {
+                // A HELD event is never dropped for lack of references; a user also has no outgoing edges.
+                NodeKind.EVENT -> "NOT t:${Labels.STORED} AND NOT EXISTS { (t)<--() }"
+
+                NodeKind.USER -> "NOT EXISTS { (t)--() }"
+
+                else -> "NOT EXISTS { (t)<--() }"
+            }
+        tx.run("MATCH (t:$label {$prop: \$key}) WHERE $condition DELETE t", mapOf("key" to key)).consume()
+    }
+
+    /** Deletes an address nothing points at (with its OWNED_BY); returns its owner to re-check. */
+    private fun dropAddressIfOrphan(
+        tx: TransactionContext,
+        address: String,
+    ): String? =
+        tx
+            .run(
+                "MATCH (t:${Labels.ADDRESS} {${Labels.ADDRESS_KEY}: \$key}) WHERE NOT EXISTS { (t)<--() } " +
+                    "OPTIONAL MATCH (t)-[:${RelTypes.OWNED_BY}]->(o:${Labels.USER}) " +
+                    "WITH t, o.${Labels.USER_KEY} AS owner DETACH DELETE t RETURN owner",
+                mapOf("key" to address),
+            ).list()
+            .firstOrNull()
+            ?.get("owner")
+            ?.takeIf { !it.isNull }
+            ?.asString()
+
+    override suspend fun visitIds(
+        since: Long,
+        until: Long,
+        pageSize: Int,
+        onPage: suspend (List<IdAndTime>) -> Boolean,
+    ) {
+        var lastCreatedAt = since - 1
+        var lastId = ""
+        while (true) {
+            val page =
+                withContext(Dispatchers.IO) {
+                    driver.session(config()).use { session ->
+                        session.executeRead { tx ->
+                            tx
+                                .run(
+                                    """
+                                    MATCH (e:${Labels.STORED})
+                                    WHERE e.created_at >= ${'$'}since AND e.created_at <= ${'$'}until
+                                      AND (e.created_at > ${'$'}ca OR (e.created_at = ${'$'}ca AND e.${Labels.EVENT_KEY} > ${'$'}id))
+                                    RETURN e.created_at AS ca, e.${Labels.EVENT_KEY} AS id
+                                    ORDER BY ca, id LIMIT ${'$'}n
+                                    """.trimIndent(),
+                                    mapOf(
+                                        "since" to since,
+                                        "until" to until,
+                                        "ca" to lastCreatedAt,
+                                        "id" to lastId,
+                                        "n" to pageSize.toLong(),
+                                    ),
+                                ).list { IdAndTime(it["ca"].asLong(), it["id"].asString()) }
+                        }
+                    }
+                }
+            if (page.isEmpty()) return
+            if (!onPage(page)) return
+            if (page.size < pageSize) return
+            lastCreatedAt = page.last().createdAt
+            lastId = page.last().id
+        }
+    }
+
+    override suspend fun edgesOf(id: String): List<EdgeView>? =
+        withContext(Dispatchers.IO) {
+            driver.session(config()).use { session ->
+                session.executeRead { tx ->
+                    val rows =
+                        tx
+                            .run(
+                                "MATCH (e:${Labels.EVENT}:${Labels.STORED} {${Labels.EVENT_KEY}: \$id}) " +
+                                    "OPTIONAL MATCH (e)-[r]->(t) " +
+                                    "RETURN type(r) AS type, labels(t) AS labels, " +
+                                    "coalesce(t.${Labels.EVENT_KEY}, t.${Labels.USER_KEY}, t.${Labels.TAG_KEY}) AS key, " +
+                                    "properties(r) AS props",
+                                mapOf("id" to id),
+                            ).list()
+                    if (rows.isEmpty()) {
+                        null
+                    } else {
+                        rows
+                            .filter { !it["type"].isNull }
+                            .map {
+                                EdgeView(
+                                    type = it["type"].asString(),
+                                    targetLabel = primaryKind(it["labels"].asList { v -> v.asString() }).label,
+                                    targetKey = it["key"].asString(),
+                                    props = normalize(it["props"]),
+                                )
+                            }.sortedWith(InMemoryGraphIndex.EDGE_ORDER)
+                    }
+                }
+            }
+        }
+
+    override suspend fun sweepFence(olderThanSecs: Long) {
+        withContext(Dispatchers.IO) {
+            driver.session(config()).use { session ->
+                do {
+                    val deleted =
+                        session.executeWrite { tx ->
+                            tx
+                                .run(
+                                    "MATCH (r:${Labels.REMOVED}) WHERE r.at < \$t WITH r LIMIT 10000 DELETE r RETURN count(*) AS n",
+                                    mapOf("t" to olderThanSecs),
+                                ).single()["n"]
+                                .asLong()
+                        }
+                } while (deleted > 0)
+            }
+        }
+    }
+
+    override suspend fun dump(): GraphDump =
+        withContext(Dispatchers.IO) {
+            driver.session(config()).use { session ->
+                session.executeRead { tx ->
+                    val nodes =
+                        tx
+                            .run(
+                                "MATCH (n) WHERE NOT n:${Labels.REMOVED} AND NOT n:${Labels.META} " +
+                                    "RETURN labels(n) AS labels, properties(n) AS props",
+                            ).list { rec ->
+                                val labels = rec["labels"].asList { it.asString() }
+                                val kind = primaryKind(labels)
+                                val (_, keyProp) = labelAndKey(kind)
+                                val props = normalize(rec["props"]).toMutableMap()
+                                val key = props.remove(keyProp) as String
+                                NodeView(kind.label, key, Labels.STORED in labels, props)
+                            }.toSet()
+                    val edges =
+                        tx
+                            .run(
+                                "MATCH (a)-[r]->(b) RETURN labels(a) AS la, " +
+                                    "coalesce(a.${Labels.EVENT_KEY}, a.${Labels.USER_KEY}, a.${Labels.TAG_KEY}) AS ka, type(r) AS type, " +
+                                    "labels(b) AS lb, coalesce(b.${Labels.EVENT_KEY}, b.${Labels.USER_KEY}, b.${Labels.TAG_KEY}) AS kb, " +
+                                    "properties(r) AS props",
+                            ).list { rec ->
+                                EdgeRow(
+                                    primaryKind(rec["la"].asList { it.asString() }).label,
+                                    rec["ka"].asString(),
+                                    rec["type"].asString(),
+                                    primaryKind(rec["lb"].asList { it.asString() }).label,
+                                    rec["kb"].asString(),
+                                    normalize(rec["props"]),
+                                )
+                            }.toSet()
+                    GraphDump(nodes, edges)
+                }
+            }
+        }
+
+    override fun close() = Unit
+
+    companion object {
+        private fun safe(type: String): String {
+            require(RelTypes.isSafe(type)) { "unsafe relationship type $type" }
+            return type
+        }
+
+        fun primaryKind(labels: List<String>): NodeKind =
+            when {
+                Labels.EVENT in labels -> NodeKind.EVENT
+                Labels.USER in labels -> NodeKind.USER
+                Labels.ADDRESS in labels -> NodeKind.ADDRESS
+                Labels.TAG in labels -> NodeKind.TAG
+                else -> error("not a projection node: $labels")
+            }
+
+        fun labelAndKey(kind: NodeKind): Pair<String, String> =
+            when (kind) {
+                NodeKind.EVENT -> Labels.EVENT to Labels.EVENT_KEY
+                NodeKind.USER -> Labels.USER to Labels.USER_KEY
+                NodeKind.ADDRESS -> Labels.ADDRESS to Labels.ADDRESS_KEY
+                NodeKind.TAG -> Labels.TAG to Labels.TAG_KEY
+            }
+
+        /** Neo4j's property shapes → the port's: Long, String, List<String> (and Boolean/Double pass through). */
+        fun normalize(value: Value): Map<String, Any> {
+            if (value.isNull) return emptyMap()
+            val out = HashMap<String, Any>()
+            for ((k, v) in value.asMap()) {
+                out[k] =
+                    when (v) {
+                        is List<*> -> v.map { it.toString() }
+                        is Int -> v.toLong()
+                        else -> v ?: continue
+                    }
+            }
+            return out
+        }
+    }
+}
