@@ -88,6 +88,12 @@ data class ApplyOutcome(
     val stale: Int = 0,
     val fenced: Int = 0,
     val excluded: Int = 0,
+    /**
+     * Events the graph REFUSED (a non-transient error on that one event), isolated so the rest
+     * of the call still applies. The caller marks them for the reconciler, which retries; a
+     * transient failure (the server down, retries exhausted) throws instead.
+     */
+    val failed: List<Event> = emptyList(),
 ) {
     operator fun plus(o: ApplyOutcome) =
         ApplyOutcome(
@@ -96,6 +102,7 @@ data class ApplyOutcome(
             stale + o.stale,
             fenced + o.fenced,
             excluded + o.excluded,
+            if (o.failed.isEmpty()) failed else failed + o.failed,
         )
 }
 

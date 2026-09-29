@@ -21,7 +21,7 @@ unless the request says `"hydrate": false`.
 | `:Event:Stored` | `id` (64-hex) | `kind`, `created_at`, `d` (addressable kinds), `expires_at` (NIP-40), and curated values (below) | An event the relay holds |
 | `:Event` (without `:Stored`) | `id` | — | A **stub**: an id something references that the relay does not hold. Filter with `NOT n:Stored` (e.g. "most-cited missing events"). |
 | `:User` | `pubkey` (64-hex) | `name`, `display_name`, `nip05` (from the current kind 0) | Anyone who authored or was referenced |
-| `:Address` | `id` = `kind:pubkey:d` | `kind`, `pubkey`, `d` | Every addressable event (30000–39999), plus any address something references (including `10002:<pk>:`-style replaceable addresses) |
+| `:Address` | `id` = `kind:pubkey:d` | `kind`, `pubkey`, `d` | Every addressable event (30000–39999), plus any address something references (including `10002:<pk>:`-style replaceable addresses). Kinds are 0–65535. A `d` longer than 1024 UTF-8 bytes appears as `sha256:<hex of the d>` (the key must stay indexable); it is still one node per distinct `d`. |
 | `:Tag` | `key` = `name:value` | `name`, `value` | Non-reference single-letter tags, for the allowlisted names `t`, `i`, `k`, `l`, `L`, `r`, `g` only. Values of 256 bytes or less. |
 
 **An event's author is an edge, not a property.** Filter by author from the user:
@@ -55,9 +55,9 @@ Every relationship starts at an `:Event:Stored`, except `OWNED_BY`.
 | Property | Where | Meaning |
 |---|---|---|
 | `roles` | Only where the type leaves the role open (below) | e.g. `["root", "reply"]` |
-| `via` | `ref_…` | `content` (a `nostr:` link in the text), `embedded` (an event embedded in the content, e.g. a repost), `description` (the zap request inside a receipt), or the multi-letter tag that carried it (`zap`, `pinned`, `30382:rank`, …) |
+| `via` | `ref_…` | `content` (a `nostr:` link in the text), `embedded` (an event embedded in the content, e.g. a repost), `description` (the zap request inside a receipt), or the multi-letter tag that carried it (`zap`, `pinned`, `30382:rank`, …). One target reached two ways is two relationships, one per `via` (a 10040 naming one service for `30382:rank` and `30382:followers`). |
 | `kind` | `_other` types | The source kind |
-| `report` | `p_1984`, `e_1984`, `a_1984` | The NIP-56 report type (`spam`, `impersonation`, …) |
+| `report` | `p_1984`, `e_1984`, `a_1984` | The NIP-56 report type, as Quartz reads it: one of `nudity`, `malware`, `profanity`, `illegal`, `spam`, `impersonation`, `other`. The tag's own type (slot 2, or slot 3 when slot 2 is a relay hint), else the report's event-level type. |
 | `rank`, `followers` | `d_30382` | The NIP-85 assertion's scores for that user |
 
 ### Roles
@@ -112,9 +112,18 @@ Every relationship starts at an `:Event:Stored`, except `OWNED_BY`.
 | kind-7 `:Event` | `content` | The reaction symbol (`+`, `-`, an emoji, `:shortcode:`), up to 32 bytes |
 | kind-9735 `:Event` | `msats` | The receipt's bolt11 amount |
 | kind-9734 `:Event` | `msats` | The request's `amount` tag |
+| kind-0 `:Event` | `name`, `display_name`, `nip05` | The same names it sets on its author (so they survive the author's other kind 0 being removed) |
 | kinds 30023, 30311, 34550 | `title` | The `title` tag (or `name` for a community) |
 
 ---
+
+Amounts above 21M BTC (2.1×10¹⁸ msats) are not stored, so `sum(z.msats)` over real zaps cannot
+overflow.
+
+### Internal labels
+
+`:Removed` (a short-lived fence of recently removed ids, swept after about two hours) and `:Meta`
+(the schema singleton) belong to the projection's bookkeeping. They are not part of this contract.
 
 ## Example queries
 

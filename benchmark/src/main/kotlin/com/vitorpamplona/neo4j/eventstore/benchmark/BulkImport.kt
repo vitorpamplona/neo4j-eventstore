@@ -38,8 +38,11 @@ object BulkImport {
         driver: Driver,
         registry: KindRegistry = KindRegistry.quartzKnownKinds(),
         policy: GraphPolicy = GraphPolicy.Default,
+        awaitIndexesSeconds: Long = 24 * 3600L,
     ) {
-        SchemaInstaller(driver).install(registry, policy)
+        // Populating the indexes over a freshly imported graph takes as long as the graph is big —
+        // hours at production scale — so wait for them as long as it takes.
+        SchemaInstaller(driver).install(registry, policy, awaitSeconds = awaitIndexesSeconds)
         driver.session().use { session ->
             session
                 .run(

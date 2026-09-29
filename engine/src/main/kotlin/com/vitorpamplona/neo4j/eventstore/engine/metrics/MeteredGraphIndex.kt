@@ -28,6 +28,7 @@ import com.vitorpamplona.quartz.nip01Core.core.Event
 import com.vitorpamplona.quartz.nip01Core.store.IdAndTime
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * Counts and times every [GraphIndex] call, per member, for the health surface (spec §9).
@@ -53,6 +54,9 @@ class MeteredGraphIndex(
         val started = System.nanoTime()
         try {
             return block()
+        } catch (e: CancellationException) {
+            // A cancelled caller (shutdown, a closed scope) is not a failing graph.
+            throw e
         } catch (e: Exception) {
             meter.failures.incrementAndGet()
             throw e

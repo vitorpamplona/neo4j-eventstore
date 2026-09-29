@@ -46,6 +46,10 @@ import org.neo4j.driver.Driver
 import org.neo4j.driver.SessionConfig
 import org.neo4j.driver.TransactionContext
 import org.neo4j.driver.Value
+import org.neo4j.driver.exceptions.ClientException
+import org.neo4j.driver.exceptions.FatalDiscoveryException
+import org.neo4j.driver.exceptions.SecurityException
+import org.neo4j.driver.exceptions.TransactionTerminatedException
 
 /**
  * [GraphIndex] over a Neo4j server, reached through the Apache-2.0 driver only (the server is
@@ -81,7 +85,7 @@ class Neo4jGraphIndex(
         if (events.isEmpty()) return ApplyOutcome()
         val docs =
             events.map { event ->
-                if (!deriver.policy.admits(event.kind)) null else deriver.derive(event)
+                if (!deriver.policy.admits(event.kind)) null else event to deriver.derive(event)
             }
         return writeLock.withLock {
             withContext(Dispatchers.IO) {
@@ -92,7 +96,21 @@ class Neo4jGraphIndex(
                     // has been deleted in this transaction" (intermittently) instead of skipping
                     // it — and an apply may delete (a displaced incumbent's orphans) before the
                     // next event reads. Batching is the bulk importer's job, not the live path's.
-                    for (doc in docs) if (doc != null) outcome += session.executeWrite { tx -> applyOne(tx, doc, authoritative) }
+                    for (pair in docs) {
+                        if (pair == null) continue
+                        val (event, doc) = pair
+                        outcome +=
+                            try {
+                                session.executeWrite { tx -> applyOne(tx, doc, authoritative) }
+                            } catch (e: ClientException) {
+                                // The graph refuses THIS event (a constraint, a value it cannot
+                                // index): isolate it, or one poison event would fail every batch
+                                // it rides in, every reconcile of its window, forever. What is
+                                // about the connection, not the event, still throws.
+                                if (e is SecurityException || e is FatalDiscoveryException || e is TransactionTerminatedException) throw e
+                                ApplyOutcome(failed = listOf(event))
+                            }
+                    }
                     outcome
                 }
             }
@@ -133,6 +151,8 @@ class Neo4jGraphIndex(
             // Keep what the new version is about to reference (its author, its address, shared
             // targets): deleting a node and re-MERGEing its key in one transaction is the
             // read-after-delete pattern apply() avoids.
+            // That includes the incumbent itself when the new version tags it (an `e` to the
+            // previous version): it must stay a stub, not be deleted and re-created.
             unapplyStored(
                 tx,
                 incumbent.first,
@@ -141,7 +161,6 @@ class Neo4jGraphIndex(
             )
         }
         write(tx, doc)
-        tx.run("MATCH (r:${Labels.REMOVED} {id: \$id}) DELETE r", mapOf("id" to doc.id)).consume()
         return ApplyOutcome(applied = 1)
     }
 
@@ -211,18 +230,24 @@ class Neo4jGraphIndex(
         }
     }
 
+    /**
+     * Stores [doc] in ONE statement: the node, its fence cleared, every edge group (a unit `CALL`
+     * per target kind keeps the row count at one), and the author's curated names. Each
+     * statement is a blocking round trip inside the event's transaction — which holds the
+     * process's write lock — so folding them is most of the live path's per-event cost.
+     */
     private fun write(
         tx: TransactionContext,
         doc: GraphDoc,
     ) {
-        tx
-            .run(
-                "MATCH (e:${Labels.EVENT} {${Labels.EVENT_KEY}: \$id}) SET e:${Labels.STORED}, e += \$props",
-                mapOf("id" to doc.id, "props" to InMemoryGraphIndex.eventProps(doc)),
-            ).consume()
+        val params = HashMap<String, Any?>()
+        params["id"] = doc.id
+        params["props"] = InMemoryGraphIndex.eventProps(doc)
+        val cypher = StringBuilder()
+        cypher.append("MATCH (e:${Labels.EVENT} {${Labels.EVENT_KEY}: \$id}) SET e:${Labels.STORED}, e += \$props ")
+        cypher.append("WITH e OPTIONAL MATCH (r:${Labels.REMOVED} {id: \$id}) DELETE r WITH e ")
 
-        val byKind = doc.edges.groupBy { it.target.kind }
-        for ((kind, edges) in byKind) {
+        for ((kind, edges) in doc.edges.groupBy { it.target.kind }) {
             val rows =
                 edges.map { edge ->
                     require(RelTypes.isSafe(edge.type)) { "unsafe relationship type ${edge.type}" }
@@ -249,6 +274,8 @@ class Neo4jGraphIndex(
                     }
                     row
                 }
+            val param = "rows_${kind.name.lowercase()}"
+            params[param] = rows
             val merge =
                 when (kind) {
                     NodeKind.EVENT -> {
@@ -266,28 +293,30 @@ class Neo4jGraphIndex(
 
                     NodeKind.ADDRESS -> {
                         "MERGE (t:${Labels.ADDRESS} {${Labels.ADDRESS_KEY}: row.key}) " +
-                            "ON CREATE SET t.kind = row.kind, t.pubkey = row.pubkey, t.d = row.d " +
-                            "WITH e, t, row " +
-                            "CALL (t, row) { WITH t, row WHERE row.pubkey <> '' " +
-                            "MERGE (o:${Labels.USER} {${Labels.USER_KEY}: row.pubkey}) MERGE (t)-[:${RelTypes.OWNED_BY}]->(o) }"
+                            "ON CREATE SET t.kind = row.kind, t.pubkey = row.pubkey, t.d = row.d"
                     }
                 }
-            tx
-                .run(
-                    "MATCH (e:${Labels.EVENT} {${Labels.EVENT_KEY}: \$id}) UNWIND \$rows AS row $merge " +
-                        "WITH e, t, row CREATE (e)-[r:\$(row.type)]->(t) SET r = row.props",
-                    mapOf("id" to doc.id, "rows" to rows),
-                ).consume()
+            cypher.append("CALL (e) { UNWIND \$$param AS row $merge ")
+            cypher.append("CREATE (e)-[r:\$(row.type)]->(t) SET r = row.props ")
+            if (kind == NodeKind.ADDRESS) {
+                cypher.append(
+                    "WITH t, row WHERE row.pubkey <> '' " +
+                        "MERGE (o:${Labels.USER} {${Labels.USER_KEY}: row.pubkey}) MERGE (t)-[:${RelTypes.OWNED_BY}]->(o) ",
+                )
+            }
+            cypher.append("} ")
         }
 
+        // After the USER group, which MERGEd the author (every doc has its `by_` edge).
         doc.authorProps?.let { values ->
-            tx
-                .run(
-                    "MATCH (u:${Labels.USER} {${Labels.USER_KEY}: \$pk}) " +
-                        Extractors.USER_FIELDS.joinToString(" ") { "SET u.$it = null" } + " SET u += \$props",
-                    mapOf("pk" to doc.pubkey, "props" to values),
-                ).consume()
+            params["pk"] = doc.pubkey
+            params["authorProps"] = values
+            cypher.append(
+                "CALL (e) { MATCH (u:${Labels.USER} {${Labels.USER_KEY}: \$pk}) " +
+                    Extractors.USER_FIELDS.joinToString(" ") { "SET u.$it = null" } + " SET u += \$authorProps } ",
+            )
         }
+        tx.run(cypher.toString(), params).consume()
     }
 
     override suspend fun unapply(ids: List<String>) {
@@ -299,8 +328,20 @@ class Neo4jGraphIndex(
                     // One transaction per id, for the reason apply() gives.
                     for (id in ids) {
                         session.executeWrite { tx ->
-                            unapplyStored(tx, id)
+                            // Lock the event's key FIRST, held or not: apply() takes the same lock
+                            // before it reads the fence, so a concurrent apply of an id this
+                            // removal fences either commits first (and is stripped here) or
+                            // waits and then sees the fence. Without it, both would read the
+                            // other's pre-commit state and the event would end held AND fenced.
+                            tx
+                                .run(
+                                    "MERGE (e:${Labels.EVENT} {${Labels.EVENT_KEY}: \$id}) SET e.__lock = true REMOVE e.__lock",
+                                    mapOf("id" to id),
+                                ).consume()
+                            val wasStored = unapplyStored(tx, id)
                             tx.run("MERGE (r:${Labels.REMOVED} {id: \$id}) SET r.at = \$now", mapOf("id" to id, "now" to now)).consume()
+                            // The lock may have minted the node; unapplyStored already settled a held one.
+                            if (!wasStored) dropOrphans(tx, NodeKind.EVENT, listOf(id))
                         }
                     }
                 }
@@ -308,12 +349,15 @@ class Neo4jGraphIndex(
         }
     }
 
-    /** Strips a held event to a stub (or deletes it) and drops every node left unreferenced. */
+    /**
+     * Strips a held event to a stub (or deletes it) and drops every node left unreferenced.
+     * Returns false, touching nothing, when [id] is not held.
+     */
     private fun unapplyStored(
         tx: TransactionContext,
         id: String,
         keep: Set<Pair<NodeKind, String>> = emptySet(),
-    ) {
+    ): Boolean {
         // Lock, and learn what the event owned: its kind (kind 0 owns its author's names).
         val kind =
             tx
@@ -324,13 +368,21 @@ class Neo4jGraphIndex(
                 ).list()
                 .firstOrNull()
                 ?.get("kind")
-                ?.asLong() ?: return
+                ?.asLong() ?: return false
         if (kind == 0L) {
+            // The author's names come from their CURRENT kind 0. Online there is only ever one
+            // held; after a bulk load an older one can sit beside it until the reconciler removes
+            // it — so fall back to whichever kind 0 is still held (its node keeps the names too).
             tx
                 .run(
                     "MATCH (e:${Labels.EVENT} {${Labels.EVENT_KEY}: \$id})-[b]->(u:${Labels.USER}) " +
                         "WHERE type(b) STARTS WITH '${RelTypes.AUTHOR_PREFIX}' " +
-                        Extractors.USER_FIELDS.joinToString(" ") { "SET u.$it = null" },
+                        Extractors.USER_FIELDS.joinToString(" ") { "SET u.$it = null" } +
+                        " WITH u OPTIONAL MATCH (u)<-[:${RelTypes.authored("0")}]-(k:${Labels.STORED}) " +
+                        "WHERE k.${Labels.EVENT_KEY} <> \$id " +
+                        "WITH u, k ORDER BY k.created_at DESC, k.${Labels.EVENT_KEY} ASC LIMIT 1 " +
+                        "WITH u, k WHERE k IS NOT NULL " +
+                        Extractors.USER_FIELDS.joinToString(" ") { "SET u.$it = k.$it" },
                     mapOf("id" to id),
                 ).consume()
         }
@@ -345,34 +397,49 @@ class Neo4jGraphIndex(
                     REMOVE e:${Labels.STORED}
                     SET e = {${Labels.EVENT_KEY}: ${'$'}id}
                     WITH e, targets
-                    CALL (e) { WITH e WHERE NOT EXISTS { (e)<--() } DELETE e }
+                    CALL (e) { WITH e WHERE NOT ${'$'}keepSelf AND NOT EXISTS { (e)<--() } DELETE e }
                     UNWIND targets AS t
                     RETURN labels(t) AS labels,
                            coalesce(t.${Labels.EVENT_KEY}, t.${Labels.USER_KEY}, t.${Labels.TAG_KEY}) AS key
                     """.trimIndent(),
-                    mapOf("id" to id),
+                    mapOf("id" to id, "keepSelf" to ((NodeKind.EVENT to id) in keep)),
                 ).list()
                 .map { primaryKind(it["labels"].asList { v -> v.asString() }) to it["key"].asString() }
+                .filter { it !in keep }
 
         // Non-users first (an address takes its OWNED_BY with it), then users, so each check
         // runs after every edge that could have kept it alive is gone.
-        val users = HashSet<String>()
-        for ((k, key) in targets) {
-            if ((k to key) in keep) continue
-            when (k) {
-                NodeKind.USER -> users += key
-                NodeKind.ADDRESS -> dropAddressIfOrphan(tx, key)?.let { users += it }
-                else -> dropIfOrphan(tx, k, key)
-            }
-        }
-        users.forEach { if ((NodeKind.USER to it) !in keep) dropIfOrphan(tx, NodeKind.USER, it) }
+        val byKind = targets.groupBy({ it.first }, { it.second })
+        byKind[NodeKind.EVENT]?.let { dropOrphans(tx, NodeKind.EVENT, it) }
+        byKind[NodeKind.TAG]?.let { dropOrphans(tx, NodeKind.TAG, it) }
+        val users = HashSet<String>(byKind[NodeKind.USER] ?: emptyList())
+        byKind[NodeKind.ADDRESS]?.let { users += dropAddressOrphans(tx, it) }
+        users.removeIf { (NodeKind.USER to it) in keep }
+        if (users.isNotEmpty()) dropOrphans(tx, NodeKind.USER, users)
+        return true
     }
 
     private fun dropIfOrphan(
         tx: TransactionContext,
         kind: NodeKind,
         key: String,
+    ) = dropOrphans(tx, kind, listOf(key))
+
+    /**
+     * Deletes each of [keys] that nothing references any more, in one statement.
+     *
+     * LOCK, THEN TEST: the test must see the committed state AFTER this transaction holds the
+     * node's lock. Tested first, a concurrent writer (the other process) could add an edge
+     * between the test and the delete — and the delete would then fail at commit, or, for a
+     * `DETACH`, silently take that writer's committed edge with it. Keys are sorted so two
+     * writers take the locks in one order.
+     */
+    private fun dropOrphans(
+        tx: TransactionContext,
+        kind: NodeKind,
+        keys: Collection<String>,
     ) {
+        if (keys.isEmpty()) return
         val (label, prop) = labelAndKey(kind)
         val condition =
             when (kind) {
@@ -383,25 +450,32 @@ class Neo4jGraphIndex(
 
                 else -> "NOT EXISTS { (t)<--() }"
             }
-        tx.run("MATCH (t:$label {$prop: \$key}) WHERE $condition DELETE t", mapOf("key" to key)).consume()
+        tx
+            .run(
+                "UNWIND \$keys AS key MATCH (t:$label {$prop: key}) SET t.__lock = true REMOVE t.__lock " +
+                    "WITH t WHERE $condition DELETE t",
+                mapOf("keys" to keys.sorted()),
+            ).consume()
     }
 
-    /** Deletes an address nothing points at (with its OWNED_BY); returns its owner to re-check. */
+    /** Address [dropOrphans]: takes each dropped address's OWNED_BY with it and returns the owners to re-check. */
+    private fun dropAddressOrphans(
+        tx: TransactionContext,
+        addresses: Collection<String>,
+    ): List<String> =
+        tx
+            .run(
+                "UNWIND \$keys AS key MATCH (t:${Labels.ADDRESS} {${Labels.ADDRESS_KEY}: key}) " +
+                    "SET t.__lock = true REMOVE t.__lock WITH t WHERE NOT EXISTS { (t)<--() } " +
+                    "WITH t, [(t)-[:${RelTypes.OWNED_BY}]->(o:${Labels.USER}) | o.${Labels.USER_KEY}] AS owners " +
+                    "DETACH DELETE t UNWIND owners AS owner RETURN DISTINCT owner",
+                mapOf("keys" to addresses.sorted()),
+            ).list { it["owner"].asString() }
+
     private fun dropAddressIfOrphan(
         tx: TransactionContext,
         address: String,
-    ): String? =
-        tx
-            .run(
-                "MATCH (t:${Labels.ADDRESS} {${Labels.ADDRESS_KEY}: \$key}) WHERE NOT EXISTS { (t)<--() } " +
-                    "OPTIONAL MATCH (t)-[:${RelTypes.OWNED_BY}]->(o:${Labels.USER}) " +
-                    "WITH t, o.${Labels.USER_KEY} AS owner DETACH DELETE t RETURN owner",
-                mapOf("key" to address),
-            ).list()
-            .firstOrNull()
-            ?.get("owner")
-            ?.takeIf { !it.isNull }
-            ?.asString()
+    ): String? = dropAddressOrphans(tx, listOf(address)).firstOrNull()
 
     override suspend fun visitIds(
         since: Long,
@@ -409,7 +483,9 @@ class Neo4jGraphIndex(
         pageSize: Int,
         onPage: suspend (List<IdAndTime>) -> Boolean,
     ) {
-        var lastCreatedAt = since - 1
+        // No sentinel cursor: `since - 1` overflows for since = Long.MIN_VALUE (the sweep's head).
+        var first = true
+        var lastCreatedAt = since
         var lastId = ""
         while (true) {
             val page =
@@ -420,14 +496,17 @@ class Neo4jGraphIndex(
                                 .run(
                                     """
                                     MATCH (e:${Labels.STORED})
-                                    WHERE e.created_at >= ${'$'}since AND e.created_at <= ${'$'}until
-                                      AND (e.created_at > ${'$'}ca OR (e.created_at = ${'$'}ca AND e.${Labels.EVENT_KEY} > ${'$'}id))
+                                    WHERE e.created_at >= ${'$'}from AND e.created_at <= ${'$'}until
+                                      AND (${'$'}first OR e.created_at > ${'$'}ca OR (e.created_at = ${'$'}ca AND e.${Labels.EVENT_KEY} > ${'$'}id))
                                     RETURN e.created_at AS ca, e.${Labels.EVENT_KEY} AS id
                                     ORDER BY ca, id LIMIT ${'$'}n
                                     """.trimIndent(),
                                     mapOf(
-                                        "since" to since,
+                                        // The seek starts at the cursor, not at `since`: the OR below is
+                                        // only a filter, so without this every page re-read the window.
+                                        "from" to maxOf(since, lastCreatedAt),
                                         "until" to until,
+                                        "first" to first,
                                         "ca" to lastCreatedAt,
                                         "id" to lastId,
                                         "n" to pageSize.toLong(),
@@ -439,6 +518,7 @@ class Neo4jGraphIndex(
             if (page.isEmpty()) return
             if (!onPage(page)) return
             if (page.size < pageSize) return
+            first = false
             lastCreatedAt = page.last().createdAt
             lastId = page.last().id
         }

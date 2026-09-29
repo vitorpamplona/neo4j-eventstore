@@ -23,7 +23,6 @@ package com.vitorpamplona.neo4j.eventstore.engine.derive
 import com.vitorpamplona.neo4j.eventstore.engine.schema.GraphPolicy
 import com.vitorpamplona.neo4j.eventstore.engine.schema.KindRegistry
 import com.vitorpamplona.neo4j.eventstore.engine.schema.RelTypes
-import com.vitorpamplona.quartz.nip01Core.core.Address
 import com.vitorpamplona.quartz.nip01Core.core.Event
 import com.vitorpamplona.quartz.nip01Core.core.isAddressable
 import com.vitorpamplona.quartz.nip01Core.core.isReplaceable
@@ -63,6 +62,8 @@ class EdgeDeriver(
 
         // Step 1 — what Quartz says this kind links, validated to canonical keys.
         val secrets = LinkRules.contentSecrets(event.content)
+        // Rule 4 reads the FIRST `d` only, as Quartz's aboutUser() does; a second `d` asserts nothing.
+        val firstD = tags.indexOfFirst { it.size >= 2 && it[0] == "d" }
         val linkedEvents = providerSet { (event as? EventHintProvider)?.linkedEventIds() }.filterCanonicalHex() - event.id
         val linkedUsers = providerSet { (event as? PubKeyHintProvider)?.linkedPubKeys() }.filterCanonicalHex() - secrets
         val linkedAddresses =
@@ -82,9 +83,15 @@ class EdgeDeriver(
             val name = tag[0]
             if (!isIndexableTagName(name)) return@forEachIndexed
             val value = tag[1]
-            // A key the content reveals as a PRIVATE key never becomes a node, from any tag.
-            if (value in secrets) return@forEachIndexed
-            val target = classify(kind, name, value, linkedEvents, linkedUsers, linkedAddresses)
+            // A key the content reveals as a PRIVATE key never becomes a node, from any tag — nor
+            // does a value carrying a bech32 one (`["t","nsec1…"]`, a URL with `?k=nsec1…`).
+            if (value in secrets || LinkRules.carriesNsec(value)) return@forEachIndexed
+            val target =
+                if (name == "d" && index != firstD) {
+                    null
+                } else {
+                    classify(kind, name, value, linkedEvents, linkedUsers, linkedAddresses)
+                }
             val type = RelTypes.literal(name, segment)
             if (target != null) {
                 if (target.kind == NodeKind.EVENT && target.key == event.id) return@forEachIndexed
@@ -145,9 +152,9 @@ class EdgeDeriver(
         val slot: Slot? =
             when {
                 kind.isAddressable() -> {
-                    val d = tags.firstOrNull { it.size >= 2 && it[0] == "d" }?.get(1) ?: ""
+                    val d = boundedD(tags.firstOrNull { it.size >= 2 && it[0] == "d" }?.get(1) ?: "")
                     nodeProps[D] = d
-                    val address = Address.assemble(kind, event.pubKey, d)
+                    val address = assembleAddress(kind, event.pubKey, d)
                     out.add(EdgeDoc(RelTypes.VERSION_OF, NodeRef(NodeKind.ADDRESS, address)))
                     Slot.Addressable(address)
                 }
@@ -283,12 +290,16 @@ class EdgeDeriver(
     }
 }
 
-/** Collects edges, collapsing duplicates to one per (type, target) with their roles unioned. */
+/**
+ * Collects edges, collapsing duplicates to one per (type, target, via) with their roles unioned.
+ * `via` is part of the key: one target reached two ways (a 10040 naming a service for both
+ * `30382:rank` and `30382:followers`) is two facts, and a query filters on either.
+ */
 private class EdgeCollector {
-    private val byKey = LinkedHashMap<Pair<String, NodeRef>, EdgeDoc>()
+    private val byKey = LinkedHashMap<Triple<String, NodeRef, Any?>, EdgeDoc>()
 
     fun add(edge: EdgeDoc) {
-        val key = edge.type to edge.target
+        val key = Triple(edge.type, edge.target, edge.props[EdgeDeriver.VIA])
         val existing = byKey[key]
         if (existing == null) {
             byKey[key] = edge

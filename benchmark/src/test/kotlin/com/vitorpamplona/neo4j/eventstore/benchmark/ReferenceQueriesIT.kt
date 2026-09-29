@@ -188,6 +188,16 @@ class ReferenceQueriesIT {
                 )
             assertEquals(listOf(n2.id to 1L), hybrid.map { it.jsonArray[0].jsonPrimitive.content to it.jsonArray[1].jsonPrimitive.long })
 
+            // JSON has no NaN: a non-finite result must not break the streamed document.
+            val nan = rows(cypher, "RETURN 0.0 / 0.0 AS x, 1.0 / 0.0 AS y")
+            assertEquals(listOf("NaN", "Infinity"), nan[0].jsonArray.map { it.jsonPrimitive.content })
+
+            // A refused query is audited even though execute() never runs it.
+            val audited = ArrayList<String>()
+            val auditing = CypherService(driver, audit = { audited += it.outcome })
+            assertTrue(auditing.precheck(CypherRequest("CREATE (:Pwned)"), caller = "x") != null)
+            assertTrue(audited.single().startsWith("rejected"), "$audited")
+
             // Without hydration a held event is its node properties.
             val (_, raw) = cypher.query(CypherRequest("MATCH (n:Event:Stored {id: \$id}) RETURN n", mapOf("id" to n1.id), hydrate = false))
             val node =

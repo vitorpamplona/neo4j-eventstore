@@ -61,6 +61,12 @@ object RoleTable {
         val eIndexes: List<Int> = tags.indices.filter { tags[it].size >= 2 && tags[it][0] == "e" }
         val lastA: Int = tags.indices.lastOrNull { tags[it].size >= 2 && tags[it][0] == "a" } ?: -1
 
+        // NIP-18 / NIP-25 targets as Quartz's boostedEventId() / boostedAddress() read them: the
+        // last tag that PARSES, so a trailing malformed `["e",""]` does not steal the role.
+        val lastValidE: Int = tags.indices.lastOrNull { tags[it].size >= 2 && tags[it][0] == "e" && isCanonicalHex64(tags[it][1]) } ?: -1
+        val lastValidA: Int =
+            tags.indices.lastOrNull { tags[it].size >= 2 && tags[it][0] == "a" && canonicalAddress(tags[it][1]) != null } ?: -1
+
         // NIP-10 exactly as Quartz reads it. ROOT = BaseThreadedEvent.root(): the marked root,
         // else the first unmarked `e`. REPLY = the DIRECT PARENT, BaseThreadedEvent.replyingTo():
         // the last marked reply, else the marked root (NIP-10: a direct reply to the root carries
@@ -117,8 +123,8 @@ object RoleTable {
         targetRole: String,
     ): List<String>? =
         when (name) {
-            "e" -> listOf(if (index == ctx.eIndexes.lastOrNull()) targetRole else CONTEXT)
-            "a" -> listOf(if (index == ctx.lastA) targetRole else CONTEXT)
+            "e" -> listOf(if (index == ctx.lastValidE) targetRole else CONTEXT)
+            "a" -> listOf(if (index == ctx.lastValidA) targetRole else CONTEXT)
             else -> null
         }
 

@@ -46,6 +46,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -54,6 +55,7 @@ import org.neo4j.driver.AuthTokens
 import org.neo4j.driver.Driver
 import org.neo4j.driver.GraphDatabase
 import org.neo4j.driver.SessionConfig
+import java.io.File
 
 /**
  * The front door (spec §2): a Neo4j graph kept an exact projection of [SourceOfTruth], plus the
@@ -66,6 +68,8 @@ import org.neo4j.driver.SessionConfig
 class GraphProjection private constructor(
     private val driver: Driver,
     private val ownsDriver: Boolean,
+    private val cypherDriver: Driver,
+    private val dirtyFile: File?,
     private val database: String,
     val index: GraphIndex,
     private val feed: GraphFeed,
@@ -136,19 +140,35 @@ class GraphProjection private constructor(
             }
         }
 
+    /**
+     * Drains the feed (up to [DRAIN_TIMEOUT_MILLIS]), saves what is still owed to the dirty file,
+     * then closes. Close the SOURCE first: a write it reports after this is only counted.
+     */
     override fun close() {
-        feed.close()
+        runBlocking { feed.closeAndDrain(DRAIN_TIMEOUT_MILLIS) }
+        dirtyFile?.let { runCatching { dirty.save(it) } }
         scope.cancel()
         index.close()
-        if (ownsDriver) driver.close()
+        if (ownsDriver) {
+            if (cypherDriver !== driver) cypherDriver.close()
+            driver.close()
+        }
     }
 
     companion object {
+        const val DRAIN_TIMEOUT_MILLIS = 10_000L
+
         /**
          * Connects, installs the schema (idempotent), checks the server is safe to expose to
          * callers' Cypher, and starts the feed consumer. Does NOT start [reconcileLoop] — the
-         * embedding process decides which of its processes reconciles (vespa-relay: only the
-         * relay, not the sync process).
+         * embedding process decides how each of its processes reconciles (vespa-relay: the relay
+         * runs every stage, the sync process only repairs its own drops, `dirtyOnly`).
+         *
+         * Callers' Cypher gets its OWN connection pool: a slow reader holds a connection for as
+         * long as it streams, and on a shared pool enough of them would starve the feed's writes.
+         *
+         * [dirtyFile], when given, keeps the feed's owed repairs across a restart: loaded here,
+         * saved on [close].
          */
         fun open(
             url: String,
@@ -163,10 +183,13 @@ class GraphProjection private constructor(
             installSchema: Boolean = true,
             requireSafeServer: Boolean = true,
             queueCapacity: Int = GraphFeed.DEFAULT_CAPACITY,
+            dirtyFile: File? = null,
         ): GraphProjection =
             open(
                 driver = GraphDatabase.driver(url, AuthTokens.basic(user, password)),
                 ownsDriver = true,
+                cypherDriver = GraphDatabase.driver(url, AuthTokens.basic(user, password)),
+                dirtyFile = dirtyFile,
                 source = source,
                 database = database,
                 policy = policy,
@@ -190,7 +213,10 @@ class GraphProjection private constructor(
             installSchema: Boolean = true,
             requireSafeServer: Boolean = true,
             queueCapacity: Int = GraphFeed.DEFAULT_CAPACITY,
+            cypherDriver: Driver = driver,
+            dirtyFile: File? = null,
         ): GraphProjection {
+            require(queueCapacity >= 1) { "queueCapacity must be >= 1, was $queueCapacity" }
             driver.verifyConnectivity()
             if (installSchema) SchemaInstaller(driver, database).install(registry, policy)
             if (requireSafeServer) {
@@ -199,6 +225,7 @@ class GraphProjection private constructor(
             }
             val index = MeteredGraphIndex(Neo4jGraphIndex(driver, database, EdgeDeriver(registry, policy)))
             val dirty = DirtyTracker()
+            dirtyFile?.let { dirty.load(it) }
             val feed = GraphFeed(index, dirty, policy, queueCapacity)
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
             feed.start(scope)
@@ -206,12 +233,14 @@ class GraphProjection private constructor(
             return GraphProjection(
                 driver = driver,
                 ownsDriver = ownsDriver,
+                cypherDriver = cypherDriver,
+                dirtyFile = dirtyFile,
                 database = database,
                 index = index,
                 feed = feed,
                 dirty = dirty,
                 reconcileLoop = ReconcileLoop(reconciler, dirty, cursor),
-                cypher = CypherService(driver, database, Hydrator { ids -> source.fetch(ids) }, audit),
+                cypher = CypherService(cypherDriver, database, Hydrator { ids -> source.fetch(ids) }, audit),
                 registry = registry,
                 policy = policy,
                 scope = scope,

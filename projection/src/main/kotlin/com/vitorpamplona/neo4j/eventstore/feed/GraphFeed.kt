@@ -27,8 +27,10 @@ import com.vitorpamplona.quartz.nip01Core.core.Event
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -40,16 +42,24 @@ interface ChangeListener {
     fun onPut(events: List<Event>)
 
     fun onRemove(ids: List<String>)
+
+    /** A source write that FAILED: each event may or may not be stored now, each id may or may not be removed. */
+    fun onUncertain(
+        events: List<Event>,
+        ids: List<String>,
+    )
 }
 
 /**
  * The live half of the projection (spec §6.2): the source's write path ENQUEUES and returns;
  * one consumer drains into the [GraphIndex] in order.
  *
- * The source's latency never depends on the graph: the queue is bounded, and an entry that does
- * not fit is DROPPED and marked in [dirty] — a put by its `created_at` hour, a remove by its id —
- * for the reconciler to repair first. A graph write that fails is marked the same way. There is
- * no durable outbox: the reconciler is the durability mechanism, and it is needed anyway.
+ * The source's latency never depends on the graph: the queue is bounded — in EVENTS and ids, not
+ * in calls, since one call can be a sync batch of thousands — and an entry that does not fit is
+ * DROPPED and marked in [dirty] — a put by its `created_at` hour, a remove by its id — for the
+ * reconciler to repair first. A graph write that fails, or an event the graph refuses, is marked
+ * the same way. There is no durable outbox: the reconciler is the durability mechanism, and it is
+ * needed anyway.
  */
 class GraphFeed(
     private val graph: GraphIndex,
@@ -73,7 +83,10 @@ class GraphFeed(
         ) : Op
     }
 
-    private val queue = Channel<Op>(capacity)
+    // Unlimited as a channel; [capacity] is enforced in items by [pendingItems].
+    private val queue = Channel<Op>(Channel.UNLIMITED)
+    private val maxItems = capacity.toLong()
+    private val pendingItems = AtomicLong()
     private var consumer: Job? = null
 
     private val queued = AtomicLong()
@@ -87,7 +100,7 @@ class GraphFeed(
     override fun onPut(events: List<Event>) {
         val admitted = if (policy.excludedKinds.isEmpty()) events else events.filter { policy.admits(it.kind) }
         if (admitted.isEmpty()) return
-        if (queue.trySend(Op.Put(admitted, nowMillis())).isSuccess) {
+        if (reserve(admitted.size) && queue.trySend(Op.Put(admitted, nowMillis())).isSuccess) {
             queued.incrementAndGet()
         } else {
             dropped.addAndGet(admitted.size.toLong())
@@ -97,12 +110,45 @@ class GraphFeed(
 
     override fun onRemove(ids: List<String>) {
         if (ids.isEmpty()) return
-        if (queue.trySend(Op.Remove(ids, nowMillis())).isSuccess) {
+        if (reserve(ids.size) && queue.trySend(Op.Remove(ids, nowMillis())).isSuccess) {
             queued.incrementAndGet()
         } else {
             dropped.addAndGet(ids.size.toLong())
             dirty.markRemovals(ids)
         }
+    }
+
+    // Claims room for [n] items; false (and nothing claimed) when they do not fit. A send that then
+    // fails (a closed channel) leaves the claim — harmless, the feed is closing.
+    private fun reserve(n: Int): Boolean {
+        if (pendingItems.addAndGet(n.toLong()) <= maxItems) return true
+        pendingItems.addAndGet(-n.toLong())
+        return false
+    }
+
+    private fun Op.size() =
+        when (this) {
+            is Op.Put -> events.size
+            is Op.Remove -> ids.size
+        }
+
+    private fun markDirty(op: Op) {
+        when (op) {
+            is Op.Put -> op.events.forEach { dirty.markCreatedAt(it.createdAt) }
+            is Op.Remove -> dirty.markRemovals(op.ids)
+        }
+    }
+
+    private fun receiveNow(): Op? = queue.tryReceive().getOrNull()?.also { pendingItems.addAndGet(-it.size().toLong()) }
+
+    // Nothing to apply — which part landed is unknown — so it is owed to the reconciler, which
+    // asks the source.
+    override fun onUncertain(
+        events: List<Event>,
+        ids: List<String>,
+    ) {
+        events.forEach { if (policy.admits(it.kind)) dirty.markCreatedAt(it.createdAt) }
+        if (ids.isNotEmpty()) dirty.markRemovals(ids)
     }
 
     /** Starts the single consumer. Order within this feed is preserved. */
@@ -111,44 +157,55 @@ class GraphFeed(
         return scope
             .launch {
                 var pending: Op? = null
-                while (true) {
-                    val first = pending ?: queue.receiveCatching().getOrNull() ?: break
-                    pending = null
-                    oldestInFlight = first.enqueuedAt
-                    // Coalesce consecutive ops of the same kind into one graph batch.
-                    when (first) {
-                        is Op.Put -> {
-                            val batch = ArrayList(first.events)
-                            while (batch.size < maxBatch) {
-                                val next = queue.tryReceive().getOrNull() ?: break
-                                if (next !is Op.Put) {
-                                    pending = next
-                                    break
+                try {
+                    while (true) {
+                        val first =
+                            pending ?: queue.receiveCatching().getOrNull()?.also { pendingItems.addAndGet(-it.size().toLong()) } ?: break
+                        pending = null
+                        oldestInFlight = first.enqueuedAt
+                        // Coalesce consecutive ops of the same kind into one graph batch.
+                        when (first) {
+                            is Op.Put -> {
+                                val batch = ArrayList(first.events)
+                                while (batch.size < maxBatch) {
+                                    val next = receiveNow() ?: break
+                                    if (next !is Op.Put) {
+                                        pending = next
+                                        break
+                                    }
+                                    batch += next.events
                                 }
-                                batch += next.events
+                                runOrMarkDirty({ batch.forEach { dirty.markCreatedAt(it.createdAt) } }) {
+                                    val outcome = graph.apply(batch)
+                                    appliedEvents.addAndGet(outcome.applied.toLong())
+                                    if (outcome.failed.isNotEmpty()) {
+                                        failures.addAndGet(outcome.failed.size.toLong())
+                                        outcome.failed.forEach { dirty.markCreatedAt(it.createdAt) }
+                                    }
+                                }
                             }
-                            runOrMarkDirty({ batch.forEach { dirty.markCreatedAt(it.createdAt) } }) {
-                                appliedEvents.addAndGet(graph.apply(batch).applied.toLong())
-                            }
-                        }
 
-                        is Op.Remove -> {
-                            val batch = ArrayList(first.ids)
-                            while (batch.size < maxBatch) {
-                                val next = queue.tryReceive().getOrNull() ?: break
-                                if (next !is Op.Remove) {
-                                    pending = next
-                                    break
+                            is Op.Remove -> {
+                                val batch = ArrayList(first.ids)
+                                while (batch.size < maxBatch) {
+                                    val next = receiveNow() ?: break
+                                    if (next !is Op.Remove) {
+                                        pending = next
+                                        break
+                                    }
+                                    batch += next.ids
                                 }
-                                batch += next.ids
-                            }
-                            runOrMarkDirty({ dirty.markRemovals(batch) }) {
-                                graph.unapply(batch)
-                                removedIds.addAndGet(batch.size.toLong())
+                                runOrMarkDirty({ dirty.markRemovals(batch) }) {
+                                    graph.unapply(batch)
+                                    removedIds.addAndGet(batch.size.toLong())
+                                }
                             }
                         }
+                        oldestInFlight = 0
                     }
-                    oldestInFlight = 0
+                } finally {
+                    // Cancelled mid-coalesce: the op read ahead is in no batch yet.
+                    pending?.let { markDirty(it) }
                 }
             }.also { consumer = it }
     }
@@ -173,6 +230,20 @@ class GraphFeed(
         queue.close()
     }
 
+    /**
+     * [close], then waits up to [timeoutMillis] for the consumer to apply what is queued. What it
+     * cannot finish in time is marked dirty (to be saved by the caller) instead of vanishing
+     * with the process.
+     */
+    suspend fun closeAndDrain(timeoutMillis: Long) {
+        queue.close()
+        val job = consumer ?: return
+        if (withTimeoutOrNull(timeoutMillis) { job.join() } == null) {
+            job.cancelAndJoin()
+            while (true) markDirty(receiveNow() ?: break)
+        }
+    }
+
     /** Gauges for the relay's health surface (spec §9). */
     fun stats() =
         FeedStats(
@@ -182,10 +253,15 @@ class GraphFeed(
             removedIds = removedIds.get(),
             failures = failures.get(),
             lagMillis = oldestInFlight.let { if (it == 0L) 0 else nowMillis() - it },
+            pendingItems = pendingItems.get(),
+            dirtyHours = dirty.pendingHours().toLong(),
+            dirtyRemovals = dirty.pendingRemovals().toLong(),
+            removalsOverflowed = dirty.overflowed,
         )
 
     companion object {
-        const val DEFAULT_CAPACITY = 10_000
+        /** Queued events + removal ids. */
+        const val DEFAULT_CAPACITY = 100_000
         const val DEFAULT_BATCH = 500
     }
 }
@@ -197,4 +273,11 @@ data class FeedStats(
     val removedIds: Long,
     val failures: Long,
     val lagMillis: Long,
+    /** Events + ids waiting in the queue now. */
+    val pendingItems: Long = 0,
+    /** Work the reconciler owes: hours to re-diff, removal ids to re-check. */
+    val dirtyHours: Long = 0,
+    val dirtyRemovals: Long = 0,
+    /** Removal ids were dropped for want of room (left to the full sweep). */
+    val removalsOverflowed: Boolean = false,
 )

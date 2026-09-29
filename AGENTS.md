@@ -49,6 +49,13 @@ every port member, and `NoEmbeddedNeo4jTest` checks that no module links the GPL
 - **The Cypher guard walks the `EXPLAIN` plan.** Do not add a text-level check that the plan
   walk makes redundant. Any new allowlisted procedure must be read-only and must not reveal
   other databases.
+- **Lock, then test.** An orphan check (`NOT EXISTS {…}`) that runs before the node's lock is
+  taken sees stale state, and the other writer process can add an edge in between. Every drop
+  locks the node first, then tests.
+- **No sentinel cursors.** The sweep's head window starts at `Long.MIN_VALUE`, so `since - 1`
+  wraps around. Use an explicit first-page flag.
+- **Integration tests skip silently without Docker.** Check the `skipped=` count in
+  `benchmark/build/test-results`. `dockerd` may need starting.
 - **A JUnit test with a non-`Unit` return type is silently skipped.** Write
   `fun x(): Unit = runBlocking { … }`.
 - **neo4j-admin arguments:** the database name goes right after `full`, because

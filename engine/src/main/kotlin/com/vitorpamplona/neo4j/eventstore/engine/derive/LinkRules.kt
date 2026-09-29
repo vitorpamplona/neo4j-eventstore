@@ -53,11 +53,15 @@ object LinkRules {
      * security rule, not a nicety, and pinned by an invariant test.
      */
     fun contentSecrets(content: String): Set<String> {
-        if (!content.contains("nsec1")) return emptySet()
+        // Any case: Quartz's parser accepts `Nsec1…` (a keyboard's auto-capital) and `NSEC1…`.
+        if (!carriesNsec(content)) return emptySet()
         return runCatching {
             Nip19Parser.parseAll(content).filterIsInstance<NSec>().mapTo(HashSet()) { it.hex.lowercase() }
         }.getOrDefault(emptySet())
     }
+
+    /** Whether [value] contains a bech32 private-key prefix, in any case. */
+    fun carriesNsec(value: String): Boolean = value.contains("nsec1", ignoreCase = true)
 
     /**
      * value → the multi-letter tag name that carried it (`zap`, `pinned`, `exercise`, …), for the

@@ -20,6 +20,7 @@
  */
 package com.vitorpamplona.neo4j.eventstore.reconcile
 
+import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -35,11 +36,20 @@ class DirtyTracker(
     private val hours = ConcurrentHashMap.newKeySet<Long>()
     private val removals = ConcurrentHashMap.newKeySet<String>()
 
+    /**
+     * Set when removal ids had to be dropped for want of room. Those are left to the full sweep
+     * (which finds them as extras); surfaced on the health surface so an operator knows.
+     */
     @Volatile var overflowed: Boolean = false
         private set
 
     fun markCreatedAt(createdAt: Long) {
         hours.add(Math.floorDiv(createdAt, HOUR) * HOUR)
+    }
+
+    /** Puts back an hour start [drainHours] handed out (a reconcile that failed before reaching it). */
+    fun markHour(hourStart: Long) {
+        hours.add(hourStart)
     }
 
     fun markRemovals(ids: Collection<String>) {
@@ -60,6 +70,33 @@ class DirtyTracker(
     fun pendingHours() = hours.size
 
     fun pendingRemovals() = removals.size
+
+    /**
+     * Writes what is pending to [file] (atomically), so a restart keeps it: the tracker is in
+     * memory, and the live feed's drops are otherwise only repaired by the full sweep.
+     */
+    fun save(file: File) {
+        file.parentFile?.mkdirs()
+        val tmp = File(file.path + ".tmp")
+        tmp.bufferedWriter().use { w ->
+            if (overflowed) w.write("overflowed\n")
+            hours.forEach { w.write("h $it\n") }
+            removals.forEach { w.write("r $it\n") }
+        }
+        tmp.renameTo(file)
+    }
+
+    /** Adds what [save] wrote to [file], if it exists; a torn or foreign line is skipped. */
+    fun load(file: File) {
+        if (!file.exists()) return
+        file.forEachLine { line ->
+            when {
+                line == "overflowed" -> overflowed = true
+                line.startsWith("h ") -> line.substring(2).toLongOrNull()?.let { hours.add(it) }
+                line.startsWith("r ") -> if (removals.size < maxRemovals) removals.add(line.substring(2)) else overflowed = true
+            }
+        }
+    }
 
     companion object {
         const val HOUR = 3_600L

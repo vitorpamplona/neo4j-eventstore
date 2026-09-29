@@ -31,7 +31,7 @@ import com.vitorpamplona.quartz.nip01Core.store.IdAndTime
  * does not is MISSING (fetched and applied AUTHORITATIVELY — the source says it is held now,
  * so it bypasses the fence and displaces a stale slot incumbent that may sit in another window);
  * an id the graph holds and the source does not is EXTRA (unapplied). Windows split in
- * half while the source holds more than [maxWindowIds] in them, so memory stays bounded however
+ * half while either side holds more than [maxWindowIds] in them, so memory stays bounded however
  * the corpus is distributed (a 500M-id snapshot cannot be materialized).
  *
  * Races with the live feed are benign: a missing event still queued is applied twice (the
@@ -51,6 +51,8 @@ class MirrorReconciler(
         val missing: Long = 0,
         val extra: Long = 0,
         val vanished: Long = 0,
+        /** Missing events the graph refused to apply (ApplyOutcome.failed); retried next pass. */
+        val failed: Long = 0,
     ) {
         operator fun plus(o: Report) =
             Report(
@@ -59,20 +61,52 @@ class MirrorReconciler(
                 missing + o.missing,
                 extra + o.extra,
                 vanished + o.vanished,
+                failed + o.failed,
             )
     }
+
+    /** How far a budgeted [reconcileUpTo] got: every `created_at` up to [reachedUntil] is reconciled. */
+    data class Progress(
+        val report: Report,
+        val reachedUntil: Long,
+    )
 
     suspend fun reconcile(
         since: Long,
         until: Long,
-    ): Report {
-        if (until < since) return Report()
-        val sourceIds = collectSource(since, until) ?: return split(since, until)
+    ): Report = reconcileUpTo(since, until, Long.MAX_VALUE).report
+
+    /**
+     * [reconcile], stopping once about [budget] source ids have been diffed: leaf windows are
+     * reconciled oldest first, and a leaf that starts with the budget spent is left for the next
+     * call. The first leaf always runs, so a call always makes progress. This is what bounds a
+     * sweep tick when a WIDE window (widened across empty years) turns out to hold the corpus.
+     */
+    suspend fun reconcileUpTo(
+        since: Long,
+        until: Long,
+        budget: Long,
+    ): Progress {
+        if (until < since) return Progress(Report(), until)
+        if (budget <= 0) return Progress(Report(), if (since == Long.MIN_VALUE) since else since - 1)
+        // The graph is listed FIRST. Listed after the source, an event the source acked and the
+        // feed applied between the two listings would look EXTRA and be unapplied (and fenced).
+        // In this order the race goes the harmless way: an event applied after the graph listing
+        // looks missing and is applied again (a no-op).
+        // Both listings are capped at maxWindowIds, so memory stays bounded whichever side is big.
         val graphIds = HashSet<String>()
+        var graphTooMany = false
         graph.visitIds(since, until) { page ->
             page.forEach { graphIds += it.id }
-            true
+            if (graphIds.size > maxWindowIds && until > since) {
+                graphTooMany = true
+                false
+            } else {
+                true
+            }
         }
+        if (graphTooMany) return split(since, until, budget)
+        val sourceIds = collectSource(since, until) ?: return split(since, until, budget)
 
         val missing = sourceIds.filter { it !in graphIds }
         val extra = graphIds.filter { it !in sourceIds }
@@ -80,13 +114,31 @@ class MirrorReconciler(
         if (extra.isNotEmpty()) graph.unapply(extra)
         var applied = 0L
         var vanished = 0L
+        var failed = 0L
         for (chunk in missing.chunked(fetchChunk)) {
             val events = source.fetch(chunk).filter { policy.admits(it.kind) }
             vanished += chunk.size - events.size
-            if (events.isNotEmpty()) applied += graph.apply(events, authoritative = true).applied
+            if (events.isNotEmpty()) {
+                val outcome = graph.apply(events, authoritative = true)
+                applied += outcome.applied
+                failed += outcome.failed.size
+            }
         }
-        return Report(windows = 1, sourceIds = sourceIds.size.toLong(), missing = applied, extra = extra.size.toLong(), vanished = vanished)
+        return Progress(
+            Report(
+                windows = 1,
+                sourceIds = sourceIds.size.toLong(),
+                missing = applied,
+                extra = extra.size.toLong(),
+                vanished = vanished,
+                failed = failed,
+            ),
+            until,
+        )
     }
+
+    /** Drops fence entries older than [olderThanSecs] (spec §6.3): the fence only has to outlive a delivery race. */
+    suspend fun sweepFence(olderThanSecs: Long) = graph.sweepFence(olderThanSecs)
 
     /**
      * Repairs dropped removals: ids the feed could not deliver as removes. Those the source no
@@ -134,8 +186,14 @@ class MirrorReconciler(
     private suspend fun split(
         since: Long,
         until: Long,
-    ): Report {
-        val mid = since + (until - since) / 2
-        return reconcile(since, mid) + reconcile(mid + 1, until)
+        budget: Long,
+    ): Progress {
+        // Overflow-safe for windows spanning Long.MIN..Long.MAX (the sweep's head and tail).
+        val mid = since + ((until - since) ushr 1)
+        val left = reconcileUpTo(since, mid, budget)
+        val spent = left.report.sourceIds + left.report.windows
+        if (left.reachedUntil < mid || spent >= budget) return left
+        val right = reconcileUpTo(mid + 1, until, budget - spent)
+        return Progress(left.report + right.report, right.reachedUntil)
     }
 }

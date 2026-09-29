@@ -550,6 +550,13 @@ repairs that as an "extra".
 - **If Neo4j is slow or down,** the queue fills, entries are dropped, and hours are marked
   dirty.
 - **If a process crashes** between the Vespa ack and the apply, the reconciler repairs it.
+- **If a source write throws** (a bulk write that timed out after some chunks landed), the
+  observer's `onUncertain` marks the batch dirty instead of reporting it either way.
+- **If the graph refuses one event** (a non-transient client error), that event alone is
+  isolated (`ApplyOutcome.failed`) and marked dirty; the rest of its batch applies.
+- **On shutdown** the feed drains for up to 10 s; whatever is left is marked dirty and saved.
+- The queue is bounded in events and ids (default 100k), not in calls, because one sync call
+  can carry thousands of events.
 
 There is no durable outbox in v1. The reconciler *is* the durability mechanism, and it is needed
 anyway.
@@ -587,6 +594,11 @@ For a `created_at` window, the reconciler streams both sides in `(created_at, id
 - Vespa, filtered to policy-included kinds;
 - Neo4j `:Stored`.
 
+*Built:* the graph side is listed FIRST. Listed after the source, an event the source acked and
+the feed applied between the two listings looked extra and was unapplied. In this order that race
+resolves harmlessly: the event looks missing and is applied a second time, which is a no-op.
+Both listings are capped at the window size, so a window splits when EITHER side is too big.
+
 It merge-diffs them:
 - **extra** in Neo4j → `unapply`, first;
 - **missing** in Neo4j → `fetch` (chunks of 500) → `apply` **authoritatively**.
@@ -609,8 +621,17 @@ Cadence:
    (a week or better) is measured in P7.
 
    *Built:* each tick spends a budget of source ids (250k), not a fixed span of time. An empty
-   window widens the next ×4, up to ten years. Seen live, the first tick crossed 1970 to now in
-   13 windows and backfilled an empty graph.
+   window widens the next ×4, up to ten years. A widened window that turns out to hold data
+   (most of the corpus, say) is reconciled leaf by leaf, oldest first, only until the budget is
+   spent, and the cursor is saved where it stopped (`reconcileUpTo`). Each wrap also reconciles
+   what the cursor never visits: `created_at` below the sweep start, and everything after now.
+   The corpus has notes dated 2100, and the recent pass reaches only 15 minutes past now.
+4. The fence sweep: `:Removed` entries older than twice the fence window are deleted.
+
+Work drained from the dirty tracker is put back if the tick fails before reaching it. A process
+that only feeds the graph (vespa-relay's sync) runs `tick(dirtyOnly = true)`, repairing its own
+drops, since its tracker lives in its own memory. The tracker is saved to a file on close and
+loaded on open, so a restart keeps what is owed.
 
 Races are benign:
 - a missing event still in the live queue is applied twice, and the second apply is a no-op;

@@ -29,13 +29,17 @@ import com.vitorpamplona.neo4j.eventstore.engine.schema.GraphPolicy
 import com.vitorpamplona.neo4j.eventstore.engine.schema.KindRegistry
 import com.vitorpamplona.neo4j.eventstore.reconcile.MirrorReconciler
 import com.vitorpamplona.neo4j.eventstore.sim.GraphCorpus
+import com.vitorpamplona.neo4j.eventstore.sim.GraphCorpus.Companion.SIG
+import com.vitorpamplona.neo4j.eventstore.sim.GraphCorpus.Companion.hex
 import com.vitorpamplona.neo4j.eventstore.sim.Histories
 import com.vitorpamplona.neo4j.eventstore.sim.SimulatedSource
+import com.vitorpamplona.quartz.nip01Core.core.Event
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Tag
 import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 import kotlin.test.fail
 
 /**
@@ -125,6 +129,36 @@ class ProjectionIT {
                 true
             }
             assertEquals(events.map { it.createdAt to it.id }.sortedWith(compareBy({ it.first }, { it.second })), seen)
+            driver.close()
+        }
+
+    // Shapes the random histories rarely hit: a new version that tags the version it replaces
+    // (the incumbent must survive as a stub, not be deleted and re-MERGEd in one transaction),
+    // and a removal of an id never held (it fences, and leaves no node behind).
+    @Test
+    fun supersedingAVersionThatTheNewOneCites(): Unit =
+        runBlocking {
+            val driver = Neo4jTestServer.freshDriver()
+            SchemaInstaller(driver).install(KindRegistry.quartzKnownKinds(), GraphPolicy.Default)
+            val author = hex("author")
+            val v1 = Event(hex("v1"), author, 100, 30023, arrayOf(arrayOf("d", "doc")), "", SIG)
+            val v2 = Event(hex("v2"), author, 200, 30023, arrayOf(arrayOf("d", "doc"), arrayOf("e", v1.id)), "", SIG)
+            val l1 = Event(hex("l1"), author, 100, 3, arrayOf(arrayOf("p", hex("friend"))), "", SIG)
+            val l2 = Event(hex("l2"), author, 200, 3, arrayOf(arrayOf("p", hex("friend")), arrayOf("e", l1.id)), "", SIG)
+
+            val clock = { 1_000L }
+            val neo4j = Neo4jGraphIndex(driver, nowSecs = clock)
+            val spec = InMemoryGraphIndex(nowSecs = clock)
+            for (index in listOf(neo4j, spec)) {
+                index.apply(listOf(v1, l1))
+                index.apply(listOf(v2, l2))
+                index.unapply(listOf(hex("never-held")))
+            }
+            val dump = neo4j.dump()
+            assertSameGraph(spec.dump(), dump, "after superseding")
+            assertTrue(dump.nodes.any { it.key == v1.id && !it.stored }, "the cited old version stays as a stub")
+            assertTrue(dump.nodes.none { it.key == hex("never-held") }, "a fenced removal leaves no node")
+            assertEquals(1, neo4j.apply(listOf(Event(hex("never-held"), author, 5, 1, emptyArray(), "", SIG))).fenced)
             driver.close()
         }
 }

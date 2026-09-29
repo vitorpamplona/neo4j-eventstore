@@ -22,9 +22,13 @@ package com.vitorpamplona.neo4j.eventstore.benchmark
 
 import com.vitorpamplona.neo4j.eventstore.engine.client.Neo4jGraphIndex
 import com.vitorpamplona.neo4j.eventstore.engine.memory.InMemoryGraphIndex
+import com.vitorpamplona.neo4j.eventstore.reconcile.MirrorReconciler
 import com.vitorpamplona.neo4j.eventstore.sim.GraphCorpus
+import com.vitorpamplona.neo4j.eventstore.sim.GraphCorpus.Companion.SIG
+import com.vitorpamplona.neo4j.eventstore.sim.GraphCorpus.Companion.hex
 import com.vitorpamplona.neo4j.eventstore.sim.Histories
 import com.vitorpamplona.neo4j.eventstore.sim.SimulatedSource
+import com.vitorpamplona.quartz.nip01Core.core.Event
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Tag
@@ -45,7 +49,9 @@ import kotlin.test.assertEquals
  * [BulkCsvWriter], loaded by the real `neo4j-admin database import full` in a fresh server,
  * finalized, must dump equal to [InMemoryGraphIndex] applying the same events. It also proves
  * the importer keeps the FIRST occurrence under `--skip-duplicate-nodes` (held events beat
- * stubs; named users beat bare ones), which the writer's file order relies on.
+ * stubs; named users beat bare ones), which the writer's file order relies on — and that the
+ * catch-up reconcile removes a superseded version the dump carried, restoring the current
+ * version's user names.
  */
 @Tag("integration")
 class BulkImportIT {
@@ -58,7 +64,13 @@ class BulkImportIT {
             val random = Random(3)
             val source = SimulatedSource()
             Histories.drive(source, GraphCorpus(3), random, steps = 400, resurrections = false)
-            val events = source.held.values.toList()
+            // A dump spans time: an older kind 0 of the same author can sit in it too, FIRST in
+            // the file, so its names win the user row. The reconcile below must end with the
+            // current kind 0's names (and without the stale version).
+            val named = hex("named")
+            val stale = Event(hex("stale0"), named, 1_600_000_000, 0, emptyArray(), "{\"name\":\"old\"}", SIG)
+            source.put(Event(hex("current0"), named, 1_700_000_000, 0, emptyArray(), "{\"name\":\"new\"}", SIG))
+            val events = listOf(stale) + source.held.values.toList()
 
             // World-readable: the server image imports as its own `neo4j` user.
             val dir =
@@ -97,8 +109,12 @@ class BulkImportIT {
                         )
                     BulkImport.finalize(driver)
 
-                    val expected = InMemoryGraphIndex().apply { apply(events, authoritative = true) }.dump()
-                    val actual = Neo4jGraphIndex(driver).dump()
+                    val graph = Neo4jGraphIndex(driver)
+                    val report = MirrorReconciler(source, graph).reconcile(Long.MIN_VALUE, Long.MAX_VALUE)
+                    assertEquals(1L, report.extra, "the stale kind 0 is the one extra")
+                    val expected = InMemoryGraphIndex().apply { apply(source.held.values.toList(), authoritative = true) }.dump()
+                    val actual = graph.dump()
+                    assertEquals("new", actual.nodes.single { it.key == named }.props["name"])
                     assertEquals(expected.nodes.size, actual.nodes.size, "node count")
                     assertEquals(expected.edges.size, actual.edges.size, "edge count")
                     assertEquals(expected, actual)

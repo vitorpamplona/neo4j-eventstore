@@ -21,6 +21,7 @@
 package com.vitorpamplona.neo4j.eventstore.engine.derive
 
 import com.vitorpamplona.quartz.nip01Core.core.Address
+import java.security.MessageDigest
 
 /**
  * Canonical lowercase 64-hex — the only form an id or pubkey joins the graph in. Quartz's tag
@@ -33,13 +34,56 @@ fun isCanonicalHex64(value: String): Boolean {
     return true
 }
 
-/** The canonical address id for [value], or null if it does not parse as `kind:hexpubkey:d`. */
+/**
+ * The canonical address id for [value], or null if it is not `kind:hexpubkey:d` with a kind in
+ * 0..65535 and a lowercase 64-hex pubkey.
+ *
+ * Parsed here rather than by `Address.parse`, which logs a warning for every string of 66+
+ * characters that is not an address — and this runs on every multi-letter tag value (a zap
+ * receipt's whole `description`, every `imeta`) at ingest rate. Same result: `d` is everything
+ * after the second ':', and the kind is normalized through Int.
+ */
 fun canonicalAddress(value: String): String? {
-    if (value.indexOf(':') < 0) return null
-    val parsed = runCatching { Address.parse(value) }.getOrNull() ?: return null
-    if (!isCanonicalHex64(parsed.pubKeyHex)) return null
-    return parsed.toValue()
+    val c1 = value.indexOf(':')
+    if (c1 !in 1..5) return null
+    for (i in 0 until c1) if (value[i] !in '0'..'9') return null
+    val c2 = c1 + 65
+    if (value.length <= c2 || value[c2] != ':') return null
+    val pubkey = value.substring(c1 + 1, c2)
+    if (!isCanonicalHex64(pubkey)) return null
+    val kind = value.substring(0, c1).toInt()
+    if (kind > MAX_KIND) return null
+    return assembleAddress(kind, pubkey, value.substring(c2 + 1))
 }
+
+const val MAX_KIND = 65535
+
+/** A `d` longer than this many UTF-8 bytes joins the graph by its hash (see [boundedD]). */
+const val MAX_ADDRESS_D_BYTES = 1024
+
+const val LONG_D_PREFIX = "sha256:"
+
+/**
+ * [d] as it appears in an address key. An `:Address` key sits behind a uniqueness constraint,
+ * and Neo4j refuses to index a value over ~8 KB — so an unbounded `d` (anyone can publish one, or
+ * tag one) would make its event's transaction fail on every retry and every reconcile. A long
+ * `d` is replaced by `sha256:<hex of its UTF-8>`: still one key per distinct `d`, so the slot rule
+ * holds; the `d` text itself is not kept.
+ */
+fun boundedD(d: String): String {
+    if (d.length * 3 <= MAX_ADDRESS_D_BYTES) return d
+    val bytes = d.encodeToByteArray()
+    if (bytes.size <= MAX_ADDRESS_D_BYTES) return d
+    val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
+    return LONG_D_PREFIX + digest.joinToString("") { ((it.toInt() and 0xff) or 0x100).toString(16).substring(1) }
+}
+
+/** The one way an address key is built: `kind:pubkey:` + [boundedD]. */
+fun assembleAddress(
+    kind: Int,
+    pubkey: String,
+    d: String,
+): String = Address.assemble(kind, pubkey, boundedD(d))
 
 /** [value] cut to at most [maxBytes] UTF-8 bytes without splitting a code point. */
 fun truncateUtf8(

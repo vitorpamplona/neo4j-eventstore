@@ -55,6 +55,7 @@ class CypherService(
     private val audit: CypherAudit? = null,
     private val guard: CypherGuard = CypherGuard(database),
     private val hydrateBatch: Int = 200,
+    private val hydrateChunk: Int = 500,
 ) {
     sealed interface Outcome {
         data class Ok(
@@ -71,18 +72,33 @@ class CypherService(
      * Only the guard's verdict — for an HTTP layer that must choose its status code BEFORE it
      * starts streaming a 200 (a streamed body cannot turn into a 400 halfway). Null = allowed.
      */
-    suspend fun precheck(request: CypherRequest): Outcome.Rejected? =
-        withContext(Dispatchers.IO) {
-            val config =
-                SessionConfig
-                    .builder()
-                    .withDatabase(database)
-                    .withDefaultAccessMode(AccessMode.READ)
-                    .build()
-            driver.session(config).use { session ->
-                (guard.check(session, request.query, request.params) as? CypherGuard.Verdict.Rejected)?.let { Outcome.Rejected(it.reason) }
+    suspend fun precheck(
+        request: CypherRequest,
+        caller: String? = null,
+    ): Outcome.Rejected? {
+        val started = System.nanoTime()
+        val rejected =
+            withContext(Dispatchers.IO) {
+                val config =
+                    SessionConfig
+                        .builder()
+                        .withDatabase(database)
+                        .withDefaultAccessMode(AccessMode.READ)
+                        .build()
+                driver.session(config).use { session ->
+                    (
+                        guard.check(
+                            session,
+                            request.query,
+                            request.params,
+                        ) as? CypherGuard.Verdict.Rejected
+                    )?.let { Outcome.Rejected(it.reason) }
+                }
             }
-        }
+        // A refused query is audited here: the HTTP layer answers it without calling execute().
+        if (rejected != null) record(request, caller, started, 0, "rejected: ${rejected.reason}")
+        return rejected
+    }
 
     /**
      * Executes [request] and writes the JSON document `{"columns":[…],"rows":[[…],…],"elapsedMs":n}`
@@ -100,52 +116,88 @@ class CypherService(
                 .withDatabase(database)
                 .withDefaultAccessMode(AccessMode.READ)
                 .build()
-        val outcome =
-            withContext(Dispatchers.IO) {
-                driver.session(config).use { session ->
-                    when (val verdict = guard.check(session, request.query, request.params)) {
-                        is CypherGuard.Verdict.Rejected -> {
-                            Outcome.Rejected(verdict.reason)
-                        }
+        var rowsSoFar = 0L
+        var auditOutcome = "error"
+        try {
+            val outcome = run(config, request, started, sink) { rowsSoFar = it }
+            auditOutcome = if (outcome is Outcome.Rejected) "rejected: ${outcome.reason}" else "ok"
+            return outcome
+        } catch (e: Throwable) {
+            // A query that fails mid-stream (a Neo4j error, a hydration failure, the client
+            // hanging up) is audited too — it is the one an operator most needs to see.
+            auditOutcome = "error: ${e::class.simpleName}"
+            throw e
+        } finally {
+            record(request, caller, started, rowsSoFar, auditOutcome)
+        }
+    }
 
-                        CypherGuard.Verdict.Allowed -> {
-                            session.beginTransaction().use { tx ->
-                                val result = tx.run(request.query, request.params)
-                                sink(
-                                    "{\"columns\":" +
-                                        JSON.encodeToString(JsonElement.serializer(), JsonArray(result.keys().map { JsonPrimitive(it) })) +
-                                        ",\"rows\":[",
-                                )
-                                var rows = 0L
-                                val batch = ArrayList<Record>(hydrateBatch)
-                                while (result.hasNext()) {
-                                    batch += result.next()
-                                    if (batch.size >= hydrateBatch) {
-                                        rows += flush(batch, request.hydrate, rows == 0L, sink)
-                                        batch.clear()
-                                    }
+    private suspend fun run(
+        config: SessionConfig,
+        request: CypherRequest,
+        started: Long,
+        sink: suspend (String) -> Unit,
+        progress: (Long) -> Unit,
+    ): Outcome =
+        withContext(Dispatchers.IO) {
+            driver.session(config).use { session ->
+                when (val verdict = guard.check(session, request.query, request.params)) {
+                    is CypherGuard.Verdict.Rejected -> {
+                        Outcome.Rejected(verdict.reason)
+                    }
+
+                    CypherGuard.Verdict.Allowed -> {
+                        session.beginTransaction().use { tx ->
+                            val result = tx.run(request.query, request.params)
+                            sink(
+                                "{\"columns\":" +
+                                    JSON.encodeToString(JsonElement.serializer(), JsonArray(result.keys().map { JsonPrimitive(it) })) +
+                                    ",\"rows\":[",
+                            )
+                            var rows = 0L
+                            val batch = ArrayList<Record>(hydrateBatch)
+                            while (result.hasNext()) {
+                                batch += result.next()
+                                if (batch.size >= hydrateBatch) {
+                                    rows += flush(batch, request.hydrate, rows == 0L, sink)
+                                    progress(rows)
+                                    batch.clear()
                                 }
-                                rows += flush(batch, request.hydrate, rows == 0L, sink)
-                                tx.rollback() // read-only: never commit anything
-                                val elapsed = (System.nanoTime() - started) / 1_000_000
-                                sink("],\"elapsedMs\":$elapsed}")
-                                Outcome.Ok(rows, elapsed)
                             }
+                            rows += flush(batch, request.hydrate, rows == 0L, sink)
+                            progress(rows)
+                            tx.rollback() // read-only: never commit anything
+                            val elapsed = (System.nanoTime() - started) / 1_000_000
+                            sink("],\"elapsedMs\":$elapsed}")
+                            Outcome.Ok(rows, elapsed)
                         }
                     }
                 }
             }
-        audit?.record(
-            CypherAuditEntry(
-                caller = caller,
-                queryHash = sha256(request.query),
-                paramNames = request.params.keys.sorted(),
-                elapsedMs = (System.nanoTime() - started) / 1_000_000,
-                rows = (outcome as? Outcome.Ok)?.rows ?: 0,
-                outcome = if (outcome is Outcome.Rejected) "rejected: ${outcome.reason}" else "ok",
-            ),
-        )
-        return outcome
+        }
+
+    private fun record(
+        request: CypherRequest,
+        caller: String?,
+        started: Long,
+        rows: Long,
+        outcome: String,
+    ) {
+        val sink = audit ?: return
+        runCatching {
+            sink.record(
+                CypherAuditEntry(
+                    caller = caller,
+                    queryHash = sha256(request.query),
+                    paramNames = request.params.keys.sorted(),
+                    elapsedMs = (System.nanoTime() - started) / 1_000_000,
+                    rows = rows,
+                    // One line, bounded: a rejection reason quotes Neo4j's error, which quotes
+                    // the query — the audit keeps the query's HASH, not its text.
+                    outcome = outcome.replace(Regex("\\s+"), " ").take(MAX_AUDIT_OUTCOME),
+                ),
+            )
+        }
     }
 
     /** [execute] into one string — for tests and small calls. */
@@ -165,18 +217,28 @@ class CypherService(
         sink: suspend (String) -> Unit,
     ): Long {
         if (batch.isEmpty()) return 0
+        // Each value converted once (asObject() walks the whole value).
+        val values = batch.map { r -> r.values().map { it.asObject() } }
         val events =
             if (hydrate && hydrator != null) {
                 val ids = LinkedHashSet<String>()
-                batch.forEach { r -> r.values().forEach { collectStoredIds(it.asObject(), ids) } }
-                if (ids.isEmpty()) emptyMap() else hydrator.fetch(ids.toList()).associateBy { it.id }
+                values.forEach { row -> row.forEach { collectStoredIds(it, ids) } }
+                if (ids.isEmpty()) {
+                    emptyMap()
+                } else {
+                    // Chunked: one row can carry any number of nodes (`collect(n)`), and the
+                    // source answers an id list in one request.
+                    val out = HashMap<String, Event>()
+                    for (chunk in ids.chunked(hydrateChunk)) hydrator.fetch(chunk).associateByTo(out) { it.id }
+                    out
+                }
             } else {
                 null
             }
         val encoder = ResultEncoder(events)
         val text =
-            batch.joinToString(",") { r ->
-                JSON.encodeToString(JsonElement.serializer(), JsonArray(r.values().map { encoder.encode(it.asObject()) }))
+            values.joinToString(",") { row ->
+                JSON.encodeToString(JsonElement.serializer(), JsonArray(row.map { encoder.encode(it) }))
             }
         sink(if (first) text else ",$text")
         return batch.size.toLong()
@@ -196,6 +258,7 @@ class CypherService(
 
     companion object {
         private val JSON = Json
+        private const val MAX_AUDIT_OUTCOME = 300
 
         fun sha256(text: String): String =
             MessageDigest
@@ -214,19 +277,36 @@ class CypherService(
 class ResultEncoder(
     private val events: Map<String, Event>?,
 ) {
+    // A node returned many times (paths, collect()) is serialized once.
+    private val hydrated = HashMap<String, JsonElement>()
+
     fun encode(value: Any?): JsonElement =
         when (value) {
             null -> JsonNull
+
             is Node -> node(value)
+
             is Relationship -> relationship(value)
+
             is Path -> path(value)
+
             is List<*> -> JsonArray(value.map { encode(it) })
+
             is Map<*, *> -> JsonObject(value.entries.associate { it.key.toString() to encode(it.value) })
+
             is Long -> number(value)
+
             is Int -> number(value.toLong())
-            is Double -> JsonPrimitive(value)
+
+            // JSON has no NaN / Infinity: `RETURN 0.0/0.0` must not break a response already streaming.
+            is Double -> if (value.isFinite()) JsonPrimitive(value) else JsonPrimitive(value.toString())
+
+            is Float -> if (value.isFinite()) JsonPrimitive(value) else JsonPrimitive(value.toString())
+
             is Boolean -> JsonPrimitive(value)
+
             is String -> JsonPrimitive(value)
+
             else -> JsonPrimitive(value.toString())
         }
 
@@ -241,7 +321,7 @@ class ResultEncoder(
                 val id = props[Labels.EVENT_KEY] as String
                 when {
                     events == null -> JsonObject(props(props) + ("stored" to JsonPrimitive(true)))
-                    events[id] != null -> Json.parseToJsonElement(events[id]!!.toJson())
+                    events[id] != null -> hydrated.getOrPut(id) { Json.parseToJsonElement(events[id]!!.toJson()) }
                     else -> JsonObject(mapOf("id" to JsonPrimitive(id), "stored" to JsonPrimitive(false)))
                 }
             }

@@ -71,7 +71,10 @@ class BulkCsvWriter(
         val doc = deriver.derive(event)
         events++
 
-        out(STORED, "id:ID(Event),kind:long,created_at:long,d,expires_at:long,content,msats:long,title,:LABEL").apply {
+        out(
+            STORED,
+            "id:ID(Event),kind:long,created_at:long,d,expires_at:long,content,msats:long,title,name,display_name,nip05,:LABEL",
+        ).apply {
             val p = doc.nodeProps
             write(
                 listOf(
@@ -83,6 +86,9 @@ class BulkCsvWriter(
                     q(p[Extractors.CONTENT] as String?),
                     n(p[Extractors.MSATS]),
                     q(p[Extractors.TITLE] as String?),
+                    q(p["name"] as String?),
+                    q(p["display_name"] as String?),
+                    q(p["nip05"] as String?),
                     "${Labels.EVENT};${Labels.STORED}",
                 ).joinToString(","),
             )

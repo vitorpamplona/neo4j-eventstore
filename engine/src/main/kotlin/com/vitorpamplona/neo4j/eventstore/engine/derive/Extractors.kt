@@ -22,6 +22,11 @@ package com.vitorpamplona.neo4j.eventstore.engine.derive
 
 import com.vitorpamplona.neo4j.eventstore.engine.schema.GraphPolicy
 import com.vitorpamplona.quartz.nip01Core.core.Event
+import com.vitorpamplona.quartz.nip56Reports.ReportType
+import com.vitorpamplona.quartz.nip56Reports.tags.DefaultReportTag
+import com.vitorpamplona.quartz.nip56Reports.tags.ReportedAddressTag
+import com.vitorpamplona.quartz.nip56Reports.tags.ReportedAuthorTag
+import com.vitorpamplona.quartz.nip56Reports.tags.ReportedEventTag
 import com.vitorpamplona.quartz.nip57Zaps.ZapReceiptEvent
 import com.vitorpamplona.quartz.nip85TrustedAssertions.users.UserAssertionEvent
 import kotlinx.serialization.json.Json
@@ -44,7 +49,9 @@ object Extractors {
     val USER_FIELDS = listOf("name", "display_name", "nip05")
 
     private const val MAX_REACTION_BYTES = 32
-    private const val MAX_REPORT_BYTES = 32
+
+    /** 21M BTC in msats: no real amount is larger, and a larger one would overflow a Cypher `sum()`. */
+    const val MAX_MSATS = 2_100_000_000_000_000_000L
     private val json = Json { isLenient = true }
 
     /** Values on the event node itself. */
@@ -54,6 +61,12 @@ object Extractors {
     ): Map<String, Any> {
         val out = HashMap<String, Any>()
         when (event.kind) {
+            // A kind 0 keeps the names it sets on its author on its own node too: the author's
+            // names can then be restored from whichever kind 0 is still held (Neo4jGraphIndex).
+            0 -> {
+                authorValues(event, policy)?.let { out.putAll(it) }
+            }
+
             // The reaction symbol: "+", "-", an emoji, or a :shortcode:.
             7 -> {
                 val c = event.content
@@ -68,7 +81,7 @@ object Extractors {
 
             // A zap request states its amount in msats in an `amount` tag.
             9734 -> {
-                tagValue(event, "amount")?.toLongOrNull()?.let { if (it >= 0) out[MSATS] = it }
+                tagValue(event, "amount")?.toLongOrNull()?.let { if (it in 0..MAX_MSATS) out[MSATS] = it }
             }
 
             30023, 30311 -> {
@@ -91,10 +104,20 @@ object Extractors {
         policy: GraphPolicy,
     ): Map<String, Any>? =
         when {
-            // NIP-56: the report type is the tag's third element, on `p` and `e` alike.
+            // NIP-56, as Quartz's ReportEvent reads it: the tag's own type (slot 2, or slot 3 when
+            // slot 2 is a relay hint or blank), normalized to a ReportType code, else the
+            // event-level default — so `r.report` is always one of the codes, never a relay URL.
             event.kind == 1984 && (name == "p" || name == "e" || name == "a") -> {
-                val type = tag.getOrNull(2)
-                if (!type.isNullOrEmpty() && type.encodeToByteArray().size <= MAX_REPORT_BYTES) mapOf(REPORT to type) else null
+                val default = reportDefault(event)
+                val type =
+                    runCatching {
+                        when (name) {
+                            "p" -> ReportedAuthorTag.parse(tag, default)?.type
+                            "e" -> ReportedEventTag.parse(tag, default)?.type
+                            else -> ReportedAddressTag.parse(tag, default)?.type
+                        }
+                    }.getOrNull()
+                type?.let { mapOf(REPORT to it.code) }
             }
 
             // NIP-85: the assertion's scores ride the edge to the subject they are about.
@@ -139,5 +162,19 @@ object Extractors {
             ?.get(1)
             ?.takeIf { it.isNotEmpty() }
 
-    private fun toMsats(sats: BigDecimal): Long? = runCatching { sats.multiply(BigDecimal(1000)).toLong() }.getOrNull()?.takeIf { it >= 0 }
+    // ReportEvent.defaultReportType(), which is private: the event-level type, else the first
+    // tag-level one, else spam.
+    private fun reportDefault(event: Event): ReportType =
+        runCatching {
+            event.tags.firstNotNullOfOrNull(DefaultReportTag::parse)
+                ?: event.tags.firstNotNullOfOrNull {
+                    ReportedAuthorTag.parse(it)?.type
+                        ?: ReportedEventTag.parse(it)?.type
+                        ?: ReportedAddressTag.parse(it)?.type
+                }
+        }.getOrNull() ?: ReportType.SPAM
+
+    // longValueExact: a plain toLong() keeps the low 64 bits of a crafted huge bolt11 amount.
+    private fun toMsats(sats: BigDecimal): Long? =
+        runCatching { sats.multiply(BigDecimal(1000)).longValueExact() }.getOrNull()?.takeIf { it in 0..MAX_MSATS }
 }

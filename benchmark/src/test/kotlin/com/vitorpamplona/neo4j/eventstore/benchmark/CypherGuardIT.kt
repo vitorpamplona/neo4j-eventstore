@@ -81,6 +81,15 @@ class CypherGuardIT {
             "CALL db.createProperty('pwned')",
             "CALL apoc.help('x')",
             "CALL db.awaitIndexes(1)",
+            // Procedures hidden inside expressions (subquery expressions the planner may keep as
+            // nested plans rather than child operators).
+            "RETURN COLLECT { CALL dbms.listConfig() YIELD name RETURN name } AS x",
+            "RETURN CASE WHEN rand() < 2 THEN COLLECT { CALL dbms.listConfig() YIELD name RETURN name } ELSE [] END AS x",
+            "RETURN COUNT { CALL dbms.components() YIELD name RETURN name } AS c",
+            "MATCH (n) WHERE EXISTS { CALL dbms.listConfig() YIELD name RETURN name } RETURN n LIMIT 1",
+            "RETURN [x IN range(1, 2) | COLLECT { CALL dbms.listConfig() YIELD name RETURN name }] AS x",
+            "CALL () { CALL dbms.listConfig() YIELD name RETURN name } RETURN name",
+            "MATCH (n) WITH n LIMIT 1 CALL (n) { CALL dbms.listConfig() YIELD name RETURN name } RETURN name",
             // Evasion.
             "MATCH (n) RETURN n; CREATE (:Pwned)",
             "RETURN 1 UNION CREATE (:Pwned) RETURN 2",
