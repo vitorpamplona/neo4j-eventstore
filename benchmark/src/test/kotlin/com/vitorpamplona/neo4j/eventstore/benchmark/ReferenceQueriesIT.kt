@@ -26,7 +26,6 @@ import com.vitorpamplona.neo4j.eventstore.cypher.Hydrator
 import com.vitorpamplona.neo4j.eventstore.engine.client.Neo4jGraphIndex
 import com.vitorpamplona.neo4j.eventstore.engine.client.SchemaInstaller
 import com.vitorpamplona.neo4j.eventstore.engine.schema.GraphPolicy
-import com.vitorpamplona.neo4j.eventstore.engine.schema.KindRegistry
 import com.vitorpamplona.neo4j.eventstore.sim.GraphCorpus.Companion.SIG
 import com.vitorpamplona.neo4j.eventstore.sim.GraphCorpus.Companion.hex
 import com.vitorpamplona.quartz.nip01Core.core.Event
@@ -74,7 +73,10 @@ class ReferenceQueriesIT {
     private val r1 = ev(1, f1, listOf(listOf("e", n1.id, "", "root")), "R1 replies to N1")
     private val r2 = ev(1, f2, listOf(listOf("e", n1.id, "", "root"), listOf("e", r1.id, "", "reply")), "R2 replies to R1")
     private val zapRequest = ev(9734, f1, listOf(listOf("p", x), listOf("e", n1.id)))
-    private val zapReceipt = ev(9735, hex("lnurl"), listOf(listOf("p", x), listOf("e", n1.id), listOf("description", zapRequest.toJson())))
+
+    // NIP-57: the receipt copies the request's pubkey into `P`, the zap sender.
+    private val zapReceipt =
+        ev(9735, hex("lnurl"), listOf(listOf("p", x), listOf("P", f1), listOf("e", n1.id), listOf("description", zapRequest.toJson())))
     private val all =
         listOf(
             ev(3, me, listOf(listOf("p", f1), listOf("p", f2))),
@@ -109,13 +111,13 @@ class ReferenceQueriesIT {
     fun theDocumentedQueriesAnswerAsDocumented() =
         runBlocking {
             val driver = Neo4jTestServer.freshDriver()
-            SchemaInstaller(driver).install(KindRegistry.quartzKnownKinds(), GraphPolicy.Default)
+            SchemaInstaller(driver).install(GraphPolicy.Default)
             Neo4jGraphIndex(driver).apply(all)
             val byId = all.associateBy { it.id }
             val cypher = CypherService(driver, hydrator = Hydrator { ids -> ids.mapNotNull { byId[it] } })
 
             // T1 — follower count, O(1) from the dense-node group.
-            val t1 = rows(cypher, "MATCH (u:User {pubkey: \$pk}) RETURN COUNT { (u)<-[:p_3]-() } AS followers", mapOf("pk" to x))
+            val t1 = rows(cypher, "MATCH (u:User {pubkey: \$pk}) RETURN COUNT { (u)<-[:FOLLOW]-() } AS followers", mapOf("pk" to x))
             assertEquals(2L, t1[0].jsonArray[0].jsonPrimitive.long)
 
             // T2 — follows-of-follows I don't follow, ranked by how many follows follow them.
@@ -123,8 +125,9 @@ class ReferenceQueriesIT {
                 rows(
                     cypher,
                     """
-                    MATCH (me:User {pubkey: ${'$'}me})<-[:by_3]-(:Event)-[:p_3]->(f:User)<-[:by_3]-(:Event)-[:p_3]->(fof:User)
-                    WHERE fof <> me AND NOT EXISTS { (me)<-[:by_3]-(:Event)-[:p_3]->(fof) }
+                    MATCH (:Address {id: '3:' + ${'$'}me + ':'})<-[:ADDRESS]-(mine:Stored)-[:FOLLOW]->(f:User)
+                    MATCH (:Address {id: '3:' + f.pubkey + ':'})<-[:ADDRESS]-(:Stored)-[:FOLLOW]->(fof:User)
+                    WHERE fof.pubkey <> ${'$'}me AND NOT EXISTS { (mine)-[:FOLLOW]->(fof) }
                     RETURN fof.pubkey AS pk, count(DISTINCT f) AS via ORDER BY via DESC, pk
                     """.trimIndent(),
                     mapOf("me" to me),
@@ -135,7 +138,7 @@ class ReferenceQueriesIT {
             val t3 =
                 rows(
                     cypher,
-                    "MATCH (root:Event {id: \$id})<-[r:e_1]-(n:Stored) WHERE 'root' IN r.roles RETURN n ORDER BY n.created_at",
+                    "MATCH (root:Event {id: \$id})<-[:ROOT]-(n:Stored) RETURN n ORDER BY n.created_at",
                     mapOf("id" to n1.id),
                 )
             assertEquals(
@@ -147,21 +150,21 @@ class ReferenceQueriesIT {
                 },
             )
 
-            // T3b — the reply TREE through `reply` edges; a direct reply to the root counts.
+            // T3b — the reply TREE through PARENT edges; a direct reply to the root counts.
             val t3b =
                 rows(
                     cypher,
-                    "MATCH (root:Event {id: \$id}) ((p)<-[r:e_1]-(c:Stored) WHERE 'reply' IN r.roles)+ (leaf) RETURN leaf.id AS id",
+                    "MATCH (root:Event {id: \$id}) ((p)<-[:PARENT]-(c:Stored))+ (leaf) RETURN leaf.id AS id",
                     mapOf("id" to n1.id),
                 )
             assertEquals(setOf(r1.id, r2.id), t3b.map { it.jsonArray[0].jsonPrimitive.content }.toSet())
 
-            // T5 — notes my follows' follows zapped, with sats, through the zapper link.
+            // T5 — notes a user zapped, through the receipts that name them as the sender.
             val t5 =
                 rows(
                     cypher,
                     """
-                    MATCH (zapper:User {pubkey: ${'$'}zapper})<-[:P_9735|ref_p_9735]-(z:Stored)-[:e_9735]->(n:Stored {kind: 1})
+                    MATCH (zapper:User {pubkey: ${'$'}zapper})<-[:ZAP_SENDER]-(z:Stored)-[:ZAPPED]->(n:Stored {kind: 1})
                     RETURN n.id AS id, count(z) AS zaps
                     """.trimIndent(),
                     mapOf("zapper" to f1),
@@ -172,7 +175,7 @@ class ReferenceQueriesIT {
             val t9 =
                 rows(
                     cypher,
-                    "MATCH (:User {pubkey: \$s})<-[:by_30382]-(:Event)-[a:d_30382]->(u:User) WHERE a.rank >= 80 RETURN u.pubkey AS pk, a.rank AS rank",
+                    "MATCH (:User {pubkey: \$s})<-[:AUTHOR]-(:Stored {kind: 30382})-[a:SUBJECT]->(u:User) WHERE a.rank >= 80 RETURN u.pubkey AS pk, a.rank AS rank",
                     mapOf("s" to service),
                 )
             assertEquals(listOf(x to 91L), t9.map { it.jsonArray[0].jsonPrimitive.content to it.jsonArray[1].jsonPrimitive.long })
@@ -181,7 +184,7 @@ class ReferenceQueriesIT {
             val t11 =
                 rows(
                     cypher,
-                    "MATCH (:Tag {key: 't:bitcoin'})<-[:t_1]-(n:Stored)-[:t_1]->(o:Tag) WHERE o.key <> 't:bitcoin' RETURN o.value AS tag ORDER BY tag",
+                    "MATCH (:Tag {key: 't:bitcoin'})<-[:HASHTAG]-(n:Stored)-[:HASHTAG]->(o:Tag) WHERE o.key <> 't:bitcoin' RETURN o.value AS tag ORDER BY tag",
                 )
             assertEquals(listOf("art", "nostr"), t11.map { it.jsonArray[0].jsonPrimitive.content })
 
@@ -189,7 +192,7 @@ class ReferenceQueriesIT {
             val hybrid =
                 rows(
                     cypher,
-                    "UNWIND \$ids AS id MATCH (n:Event:Stored {id: id})<-[:e_7]-(:Event)-[:by_7]->(r:User) RETURN n.id AS id, count(DISTINCT r) AS reactors",
+                    "UNWIND \$ids AS id MATCH (n:Event:Stored {id: id})<-[:REACTED]-(:Stored)-[:AUTHOR]->(r:User) RETURN n.id AS id, count(DISTINCT r) AS reactors",
                     mapOf("ids" to listOf(n1.id, n2.id)),
                 )
             assertEquals(listOf(n2.id to 1L), hybrid.map { it.jsonArray[0].jsonPrimitive.content to it.jsonArray[1].jsonPrimitive.long })
@@ -199,7 +202,7 @@ class ReferenceQueriesIT {
                 rows(
                     cypher,
                     """
-                    MATCH (:User {pubkey: ${'$'}x})<-[r:p_1984 {scope: 'user'}]-(:Stored)-[:by_1984]->(reporter:User)
+                    MATCH (:User {pubkey: ${'$'}x})<-[r:REPORTED_USER]-(:Stored)-[:AUTHOR]->(reporter:User)
                     RETURN reporter.pubkey AS pk, r.report AS type
                     """.trimIndent(),
                     mapOf("x" to x),
@@ -218,7 +221,7 @@ class ReferenceQueriesIT {
                 rows(
                     cypher,
                     """
-                    MATCH (u:User)<-[r:p_1984]-(:Stored)
+                    MATCH (u:User)<-[r:REPORTED_USER|REPORTED_AUTHOR]-(:Stored)
                     WHERE r.report IN ['impersonation', 'spam', 'illegal', 'malware']
                     RETURN u.pubkey AS pk, collect(r.report) AS types ORDER BY pk
                     """.trimIndent(),
@@ -233,14 +236,14 @@ class ReferenceQueriesIT {
                             }
                     }.toSet(),
             )
-            val swearing = rows(cypher, "MATCH ()-[r:e_1984 {report_raw: 'swearing'}]->(n:Stored) RETURN n.id AS id")
+            val swearing = rows(cypher, "MATCH ()-[r:REPORTED {report_raw: 'swearing'}]->(n:Stored) RETURN n.id AS id")
             assertEquals(listOf(n1.id), swearing.map { it.jsonArray[0].jsonPrimitive.content })
 
             // A report query not anchored on one user seeks the relationship index, not every edge.
             fun operators(p: Plan): List<String> = listOf(p.operatorType()) + p.children().flatMap { operators(it) }
             val plan =
                 driver.session().use { s ->
-                    operators(s.run("EXPLAIN MATCH ()-[r:p_1984 {scope: 'user', report: 'impersonation'}]->(u) RETURN u").consume().plan())
+                    operators(s.run("EXPLAIN MATCH ()-[r:REPORTED_USER {report: 'impersonation'}]->(u) RETURN u").consume().plan())
                 }
             assertTrue(plan.any { "RelationshipIndexSeek" in it }, "$plan")
 

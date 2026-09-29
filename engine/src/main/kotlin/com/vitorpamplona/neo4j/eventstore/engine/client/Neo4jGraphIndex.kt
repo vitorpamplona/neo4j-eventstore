@@ -279,7 +279,7 @@ class Neo4jGraphIndex(
             cypher.append("} ")
         }
 
-        // After the USER group, which MERGEd the author (every doc has its `by_` edge).
+        // After the USER group, which MERGEd the author (every doc has its AUTHOR edge).
         doc.authorProps?.let { values ->
             params["pk"] = doc.pubkey
             params["authorProps"] = values

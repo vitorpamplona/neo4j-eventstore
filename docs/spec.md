@@ -2,9 +2,10 @@
 
 Status: **implemented** (2026-09-29). This repo holds the projection library; vespa-eventstore has
 the observer hook; vespa-relay has the wiring. Where building it changed a decision, the text below
-says so ("*Built:*"). It supersedes the event-store draft, which is in git history. The execution plan is [`plan.md`](plan.md), and every Quartz
-class this spec derives edges from is catalogued in
-[`appendix-providers.md`](appendix-providers.md).
+says so ("*Built:*"). It supersedes the event-store draft, which is in git history. The execution plan is [`plan.md`](plan.md).
+**Schema 2.0** replaced the derivation of §4.2 and §5: relationship types are now the relations of
+the link vocabulary ([`vocabulary.md`](vocabulary.md)), one mapper per Quartz event class says what
+each reference means, and Quartz's hint providers are no longer read.
 
 ## Summary
 
@@ -143,7 +144,7 @@ nodes** (§4.4).
 
 | Module | Packages (layer order, enforced by `ModuleBoundariesTest`) | Depends on |
 |---|---|---|
-| `:engine` | `schema/` (labels, type names, kind registry, policy) → `derive/` (`EdgeDeriver`, `LinkRules`, `RoleTable`, `Extractors`) → root port (`GraphIndex`) → `metrics/` → `memory/` (`InMemoryGraphIndex`, **the executable spec**) + `client/` (`Neo4jGraphIndex`) | Quartz, neo4j-java-driver |
+| `:engine` | `schema/` (labels, keys, policy) → `vocab/` (relations, typed props, `LinkBuilder`) → `kinds/` (one mapper per Quartz class, `KindLinks`) → `derive/` (`EdgeDeriver`, `Secrets`, `Extractors`) → root port (`GraphIndex`) → `metrics/` → `memory/` (`InMemoryGraphIndex`, **the executable spec**) + `client/` (`Neo4jGraphIndex`) | Quartz, neo4j-java-driver |
 | `:projection` | `feed/` (`GraphFeed`, `GraphProjector`, dirty windows) · `reconcile/` (`MirrorReconciler`) · `cypher/` (`CypherGuard`, `CypherService`, `ResultEncoder`, `Hydrator` port) · root: the facade `GraphProjection.open()` | `:engine`, Quartz |
 | `:benchmark` | Bulk loader (Vespa dump → CSV → `neo4j-admin import`), ITs, probes; unpublished | both |
 
@@ -183,7 +184,7 @@ by the plan's P7 measurement on a staging slice.
 | `:Event` nodes | 500M | Every kind (§4.4), plus stubs for referenced-but-absent events |
 | `:User` nodes | 62M | One per pubkey that authored or was referenced |
 | `:Address` / `:Tag` nodes | tens of millions | Addressables plus referenced replaceables only (§4.1); allowlisted tag names only |
-| Relationships | **3–6B** | 500M `by_<k>` edges, plus references (~1–2B), plus current follow lists (≈10–20M lists × a few hundred `p_3` each) |
+| Relationships | **3–6B** | 500M `AUTHOR` edges, plus references (~1–2B), plus current follow lists (≈10–20M lists × a few hundred `FOLLOW` each) |
 | Store on disk | **~300–450 GB** | Record ("aligned") format: 34 B per relationship record and 15 B per node record. Id strings (64-hex) and their unique index are a large share: ~100 GB for events alone. |
 | With bodies (not done) | roughly ×2 | The reason bodies stay in Vespa |
 
@@ -214,17 +215,18 @@ Consequences:
 | `:Event` (stub) | `id` | none | Something references an id we do not hold (never seen, excluded, or removed) |
 | `:User` | `pubkey` | curated values from kind 0 (§4.3) | It authored, or was referenced |
 | `:Address` | `id` = `kind:pubkey:d` (Quartz `AddressSerializer` form) | `kind`, `pubkey`, `d` | Any **addressable** event (30000–39999), or a reference to any address, including a replaceable one such as `10002:<pk>:` |
-| `:Tag` | `key` = `name:value` | `name`, `value` | A single-letter, non-reference tag whose name is allowlisted (§4.4) |
-| `:Meta` | singleton | `schema_version`, `kind_registry_version`, `policy_hash`, `quartz_pin` | Written by `SchemaInstaller` |
+| `:Tag` | `key` = `name:value` | `name`, `value` | A value a kind's mapper links that is not an event, user or address: a hashtag, a URL, an external id, a group id (§5) |
+| `:Meta` | singleton | `schema_version`, `policy_hash` | Written by `SchemaInstaller` |
 
-- **The author is an edge, not a property.** An event's author is its `by_<k>` edge. Dropping a
+- **The author is an edge, not a property.** An event's author is its `AUTHOR` edge. Dropping a
   64-character `pubkey` string from 500M nodes saves roughly 40–50 GB. The edge is also the
   efficient way to filter by author: start from the `:User`. This is a deliberate trade against
   convenience (Q6).
-- **Replaceable events (0, 3, 10000–19999) get no `:Address` node** unless something references
-  their address. A user's current follow list is `(:User)<-[:by_3]-(list)`, and there is exactly
-  one. Addressable events always get one, because a pubkey can hold many under different `d`
-  values.
+- **Replaceable and addressable events both have an `:Address`** (`3:<pk>:` for a follow list,
+  `30023:<pk>:<d>` for an article), reached through their `ADDRESS` edge. It is the NIP-01 slot:
+  a user's current follow list is `(:Address {id: '3:' + $pk + ':'})<-[:ADDRESS]-(list:Stored)`,
+  an index seek, and there is exactly one. *Built (2.0):* 1.x gave replaceables no address and
+  found the slot through the kind-typed author edge, which 2.0 no longer has.
 - **Stubs keep references alive.** A reply to a note we never saw still points at
   `(:Event {id})`. When the note arrives, the stub gains `:Stored`, and the reply's edge is
   already in place.
@@ -244,52 +246,45 @@ Consequences:
 
 ### 4.2 Relationships
 
-Every relationship **originates at an `:Event:Stored`**, except `OWNED_BY`. Unapplying an event
-therefore removes exactly its own contribution. No removal style needs graph-specific code.
+Every relationship **originates at an `:Event:Stored`**, except an address's `AUTHOR`.
+Unapplying an event therefore removes exactly its own contribution. No removal style needs
+graph-specific code.
 
-| Type | From → To | Meaning |
-|---|---|---|
-| `by_<k>` | Event → User | Authorship. `<k>` is the event's kind. |
-| `<t>_<k>` | Event → Event / User / Address / Tag | The event (kind `<k>`) carries the literal single-letter tag `<t>` naming that target. |
-| `ref_<f>_<k>` | Event → Event / User / Address | A **derived** reference of family `<f>` ∈ {`e`, `p`, `a`}. It is a link Quartz names that is *not* a literal single-letter tag: a `nostr:` URI in content, a multi-letter tag (`zap`, `pinned`, `30382:rank`, …), or an embedded event. |
-| `VERSION_OF` | Event → Address | This event is the address's current version. There is at most one per address. |
-| `OWNED_BY` | Address → User | The address's pubkey. Stub addresses have it too, so a reference to an unseen article still reaches its author. |
+**The type is a relation of the link vocabulary** ([`vocabulary.md`](vocabulary.md), the
+catalogue in [`schema.md`](schema.md)): what the target IS to the event that states it —
+`AUTHOR`, `ADDRESS`, `ROOT`, `PARENT`, `REACTED`, `REACTED_AUTHOR`, `FOLLOW`, `REPORTED_USER`,
+`ZAP_SENDER`, `SUBJECT`, … One relation per role across kinds: `PARENT` is a note reply's parent,
+a NIP-22 comment's parent item and a git reply's; the source node's `kind` tells them apart.
 
-- **Plain identifiers.** No backticks are needed. The prefixes (one letter plus `_`, `by_`,
-  `ref_`) cannot collide. Case is significant: `e_1111` is a NIP-22 reply and `E_1111` is a
-  NIP-22 root.
-- **Kind in the type.** Neo4j groups a dense node's relationships by type and direction.
-  Examples:
-  - `(u)<-[:p_3]-()` walks only follow lists, not millions of mentions;
-  - `COUNT { (u)<-[:p_3]-() }` is an **O(1)** follower count, read from the dense-node group;
-  - `(n)<-[:e_7]-()` walks only reactions.
-- **Kind registry.** Kinds known to the pinned Quartz (`EventFactory.isKnownKind`) get their own
-  types. Other kinds share `<t>_other` / `ref_<f>_other` / `by_other`, which carry a `kind`
-  property. This bounds the type count against spam kinds.
-  - A Quartz bump that learns a kind moves its `_other` edges to the new type through the
-    resumable `KindRegistryMigration`. It is recorded in `:Meta`.
-  - That is a visible, additive schema change (§8.6).
+- **Plain UPPER_SNAKE identifiers**, the Cypher convention; no backticks.
+- **Dense nodes stay cheap.** Neo4j groups a node's relationships by type and direction, so
+  `(u)<-[:FOLLOW]-()` walks only follow lists (FOLLOW comes from kind 3 alone; other follow-like
+  lists are `SUBSCRIBED`), and `COUNT { (u)<-[:FOLLOW]-() }` is an **O(1)** follower count. The
+  vocabulary splits a relation wherever queries separate its meanings on one target type
+  (`REPORTED_USER` vs `REPORTED_AUTHOR`), for the same reason.
+- *Built (2.0):* 1.x named types `<tag>_<kind>` (`p_3`, `e_1111`) with a kind registry and an
+  `_other` bucket; the names were complete without curation but pushed each kind's tag semantics
+  onto every query author. The kind is now only on the source node.
 
-**Relationship properties are sparse.** They exist only where the type leaves something open:
+**Relationship properties** are the link's typed props plus `via`:
 
 | Property | On | Meaning |
 |---|---|---|
-| `roles` | Types whose role-table row (§5.3) admits more than one role, e.g. `e_1` (root / reply / mention / fork), `e_7` (reaction / context), `P_9735` vs `ref_p_9735` | A list, e.g. `["root","reply"]` for a positional single-`e` reply. It is omitted where the type implies the role (e.g. `p_3` is always `follow`), and the implied role is documented in `docs/schema.md`. |
-| `via` | `ref_…` | `content`, `embedded`, `description`, or the multi-letter tag name |
-| `kind` | `_other` types | The source kind |
-| curated values | See §4.3 | e.g. `rank` on `d_30382` |
+| `via` | every link a tag or the content states | the tag name (`e`, `p`, `30382:rank`, …) or `content` for a `nostr:` URI (NIP-27). One target reached two ways is two relationships. |
+| the relation's props | e.g. `REPORTED*` (`report`, `report_raw`), `SUBJECT` (`rank`, `followers`, every NIP-85 metric), `ZAPPED` / `ZAP_RECIPIENT` (`msats`), `MEMBER` (`roles`) | Declared per relation (`vocab/props`); every key and its type is in `PropsColumns`. |
 
 **Not kept:**
 - tag positions;
 - relay hints;
-- NIP-10 markers verbatim (they become `roles`);
+- NIP-10 markers verbatim (they become `ROOT` / `PARENT` / `MENTION`);
 - a per-edge timestamp. A time filter reads the source node's `created_at`.
 
 ### 4.3 Curated properties
 
 Bodies stay in Vespa, but a few values are what graph queries actually filter or rank on.
-Extracting them keeps whole classes of query inside Cypher. Each extractor is a small `Extractors`
-entry built on a Quartz helper, and has its own golden test:
+Extracting them keeps whole classes of query inside Cypher. Values that qualify ONE reference (a
+report's category, an assertion's rank, a zap's amount) ride that edge as the relation's props
+(§4.2); the values below live on nodes, each a small `Extractors` entry built on a Quartz helper:
 
 | Kind | Where | Property | Quartz source |
 |---|---|---|---|
@@ -297,8 +292,6 @@ entry built on a Quartz helper, and has its own golden test:
 | 7 | the reaction's `:Event` | `content` (≤ 32 bytes: `+`, `-`, an emoji or a `:shortcode:`) | `ReactionEvent.content` |
 | 9735 | the receipt's `:Event` | `msats` | `ZapReceiptEvent.amount()` |
 | 9734 / 9321 / 8333 / 9736 | the event | `msats` where the kind states an amount |  |
-| 1984 | `p_1984` / `e_1984` / `a_1984` | `report` (the category: Quartz's `ReportType` code, `other` for a type it does not know), `report_raw` (the type as written, lowercased, ≤ 64 bytes), and on `p_1984` `scope` (`user` when the report names no event, address or blob; else `address` / `event` / `blob`). Relationship indexes cover them (docs/schema.md, "Reports"). | `Reported{Author,Event,Address}Tag.parse`, `ReportType` |
-| 30382 | `d_30382` (→ `:User`) | `rank`, `followers` | `UserAssertionEvent.rank()` / `followerCount()` |
 | 30023, 30311, 34550 | the event | `title` (≤ 256 bytes) | the `title` tag |
 
 Adding an extractor is an additive schema change, but it reaches only events applied after it
@@ -306,7 +299,7 @@ ships. The reconciler diffs id sets, so it never re-derives an event the graph a
 Until a re-derive pass exists, a graph built before the change gets the value only by a rebuild
 (bulk re-import).
 
-### 4.4 Kind and tag policy (`schema/GraphPolicy`)
+### 4.4 Kind policy (`schema/GraphPolicy`)
 
 The policy is configuration, not schema. Its hash is stored in `:Meta`. A changed policy makes
 the reconciler converge the graph to the new filter.
@@ -317,15 +310,9 @@ the reconciler converge the graph to the new filter.
     design depends on using it.
   - If it is ever used, the reconciler unapplies a newly excluded kind and copies a newly
     included one from Vespa.
-- **Tag nodes.** An allowlist of single-letter names that become `:Tag` nodes when their value
-  is not a reference. The default is **`t` (hashtags), `i` (NIP-73 external ids), `k`, `l` /
-  `L` (labels), `r`, `g`**.
-  - Everything else is dropped: `d` (the `:Address` covers it), `x` (per-file hashes, one node
-    per event, useless as joins), `m`, `alt`-like letters, and so on.
-  - Values longer than 256 bytes are never nodes.
-- **References are never dropped by name.** Every tag that resolves to an Event / User /
-  Address becomes an edge (§5.2), whatever its letter. The policy only governs `:Tag` nodes and
-  whole kinds.
+- **Tag values are not configuration.** Which values become `:Tag` nodes is each kind's mapper's
+  decision (`t` is a hashtag on a note but an auth verb on 24242). The policy only bounds them:
+  a value over 256 bytes is never a node. *Built (2.0):* 1.x had a global allowlist of letters.
 
 ### 4.5 Not modelled in v1
 
@@ -335,110 +322,51 @@ the reconciler converge the graph to the new filter.
 
 ---
 
-## 5. Deriving the graph from an event (`derive/`)
+## 5. Deriving the graph from an event (`kinds/`, `derive/`)
 
-`EdgeDeriver.derive(event: Event, policy): GraphDoc` is **pure**, with no I/O. It is the same
-function in the live projector, in `InMemoryGraphIndex`, and in the bulk CSV writer, so the
-three can never disagree about *what* the graph is.
+`EdgeDeriver.derive(event: Event): GraphDoc` is **pure**, with no I/O. It is the same function in
+the live projector, in `InMemoryGraphIndex`, and in the bulk CSV writer, so the three can never
+disagree about *what* the graph is.
 
-The input is a **typed** Quartz event, built with
-`EventFactory.create(id, pubkey, createdAt, kind, tags, content, sig)`, so
-`event as? PubKeyHintProvider` works. Untyped kinds come back as a plain `Event` and take only
-the generic path.
+The input is re-typed through Quartz's `EventFactory` (a store hands back plain `Event`s), because
+the mappers are registered by Quartz class.
 
-### 5.1 Step 1 — provider sets
+### 5.1 Links: what the references mean (`kinds/`)
 
-Collect the provider sets from whichever providers the class implements:
-- `L_e = linkedEventIds()`
-- `L_p = linkedPubKeys()`
-- `L_a = linkedAddressIds()`
+`KindLinks.of(event)` states the event's links, in the vocabulary of [`vocabulary.md`](vocabulary.md):
+1. `AUTHOR` → its pubkey; `ADDRESS` → its own address, for replaceable (`kind:pubkey:`) and
+   addressable (`kind:pubkey:d`, the first `d`) kinds;
+2. the tags any kind may carry: a NIP-89 `client` (`CLIENT`), NIP-57 zap splits (`ZAP_SPLIT` with
+   the weight), a NIP-30 emoji's set (`EMOJI_SET`);
+3. the class's **mapper**: one per Quartz event class, reading the tags only through Quartz's Tag
+   parsers and accessors (small local parsers where Quartz has none), e.g. a reaction's LAST
+   `e`/`a` is `REACTED` and its last `p` `REACTED_AUTHOR`, earlier ones `MENTION`.
 
-All 109 implementing classes are listed in [`appendix-providers.md`](appendix-providers.md).
+There is **no fallback**. A kind the pinned Quartz does not type states only 1 and 2; a class
+without a mapper fails `KindMappersCoverageTest`. The per-class review showed why guessing from a
+value's shape is unsafe: a 64-hex `e` in a chess start event is a board hash, and `t` is an auth
+verb in 24242.
 
-Normalize and validate each set:
-- ids and pubkeys must be canonical lowercase 64-hex;
-- addresses go through `Address.parse` and are re-serialized;
-- everything else is dropped. Quartz's parsers only check the length, and
-  `ATag.parseAddressId` returns any non-empty value.
+`LinkBuilder` validates every target (64-hex ids and keys, lowercased; `kind:<64-hex>:d`
+addresses in key form, a `d` over 1024 bytes replaced by its hash; non-blank values) and drops
+exact duplicates.
 
-### 5.2 Step 2 — classify every single-letter tag
+### 5.2 Edges: what is stored (`derive/`)
 
-For each tag `[n, v, …]` with `isIndexableTagName(n)`, the first rule that matches decides the
-target:
-
-1. `v ∈ L_e` → **Event** `v`.
-2. `v ∈ L_p` → **User** `v`.
-3. `v ∈ L_a` → **Address** `v`.
-4. **Subject rules** (`LinkRules`), for references that live outside e/p/a:
-   - `d` on **30382** → User;
-   - `d` on **30383** → Event;
-   - `d` on **30384** → Address.
-
-   These are the NIP-85 assertion subjects, and they get `roles: ["asserts"]`.
-5. **Generic fallback by name and value shape**, for kinds Quartz does not type or types without
-   a provider (NIP-71 video, NIP-90 DVMs, NIP-29 groups, …):
-   - `e` / `E` / `q` + 64-hex → Event;
-   - `p` / `P` + 64-hex → User;
-   - `a` / `A` / `q` + a valid address → Address.
-
-   Quartz's `QTag.parseAddressId` rejects every address, because it refuses any value containing
-   `:`. The fallback uses `QTag.parse`, which does not.
-6. Otherwise → **Tag** `n:v`, if the policy allowlists `n` and `v` is at most 256 bytes. If not,
-   the tag is dropped.
-
-Rules 1–5 emit `<n>_<k>`, and rule 6 emits `<n>_<k>` to a `:Tag`. One edge is written per
-(source, target, type), and the roles of duplicates are unioned.
-
-**Why the providers come first:**
-- They type the targets of tags whose name does not reveal the target: `z` parent lists,
-  NIP-22 `E` / `A` / `P`, NIP-58 badge tags, NIP-72 approvals.
-- They do so by kind semantics rather than by value shape.
-- They are the only source of the derived links in step 3.
-
-### 5.3 Step 3 — derived links and roles
-
-**Derived edges.** Every id in `L_e ∪ L_p ∪ L_a` that no literal single-letter tag produced
-becomes a `ref_<f>_<k>` edge. Its `via` records where it came from:
-- `content`, for `nostr:` URIs in the 14 classes whose providers include `citedNIP19()`;
-- the multi-letter tag name, e.g. `zap`, `pinned`, `exercise`, `template`;
-- `embedded`.
-
-**Link rules that fill Quartz gaps.** Each gap is also filed upstream (plan P0):
+Each link becomes an edge of type `relation.name`, with the props in store form plus `via`
+(numbers widened to `Long` / `Double`, as Neo4j returns them). The deriver adds the rules about
+storage, not meaning:
 
 | Rule | Why |
 |---|---|
-| **Drop content `nsec1…` entities** from `L_p` | `ListEntityExt.pubKeys()` maps `NSec` to its hex, which is a **private key**. The deriver re-scans content and never writes a key that came from an `NSec`. This is a security requirement, covered by an invariant test. |
-| Drop self-links (`v == event.id`) | `ChannelCreateEvent.linkedEventIds()` returns its own id. |
-| **9735**: `ref_p_9735 {via:"description", roles:["zapper"]}` → the embedded zap request's author, and `ref_e_9735 {via:"description"}` → the request's id | The receipt's providers omit the sender. A literal `P` tag, when present, is already a `P_9735`. |
-| **10040**: `ref_p_10040 {via:"<kind>:<service>"}` → the service pubkey, from `ServiceProviderTag` (tag name e.g. `30382:rank`) | The trust-provider list does not implement a provider. |
-| **6 / 16**: `ref_e_<k>` / `ref_p_<k>` `{via:"embedded"}` → the embedded event's id and author, when no literal tag names them | Reposts often embed the original. |
+| **The nsec rule**: no target and no prop value may carry a private key, as the hex of an `nsec1…` pasted in the content or as bech32 in any value | Quartz's `ListEntityExt.pubKeys()` has mapped an `NSec` to its hex; a tag value can carry one verbatim. A security requirement, covered by an invariant test. |
+| No self-links | An event naming its own id adds nothing and would pin its own stub. |
+| A `:Tag` value over 256 bytes is dropped | The key sits behind a uniqueness constraint. |
+| The slot is the `ADDRESS` edge | Supersession (§6.2) looks the incumbent up through it. |
 
-**Roles.** `RoleTable` assigns roles per (kind, tag, marker), delegating to Quartz's helpers so
-the semantics are Quartz's. `roles` is **stored only where the row admits more than one role**
-(§4.2). Rows whose role is implied by the type are documented, not stored.
+Curated node values (§4.3) and `expires_at` come from `Extractors`.
 
-| Kinds | Tag → roles | Stored? | Quartz source |
-|---|---|---|---|
-| 1, 42, 1311, 2004, 30818, 1617, 1630–1633 | `e` → `root` / `reply` / `mention` / `fork`. `root` is Quartz's `root()`. `reply` is the **direct parent**, Quartz's `replyingTo()`: the reply marker, else the marked root (a direct reply to the root carries only a `root` marker), else the last unmarked `e`. Following `reply` edges therefore walks a whole tree.; `p` → `mention` | `e`: yes; `p`: implied | `MarkedETag.parse*`, `BaseThreadedEvent.root()` / `reply()`, `TextNoteEvent.isAFork()` |
-| 1111, 1244 | `E` / `A` → `root`, `e` / `a` → `reply`, `P` → `root_author`, `p` → `reply_author` | implied by the letter's case | `CommentEvent.rootEventIds()` / `replyEventIds()` / … |
-| any | `q` → `quote` | implied | `QTag.parse` |
-| 6, 16 | last `e` / `a` → `repost`, others → `context`; `p` → `reposted_author` | `e` / `a`: yes | `BaseRepostEvent.boostedEventId()` / `boostedAddress()` |
-| 7 | last `e` / `a` → `reaction` (NIP-25 target), others → `context`; `p` → `reacted_author` | `e` / `a`: yes | NIP-25 rule (store-side; Quartz has no "last e" helper) |
-| 9734, 9735 | `e` / `a` → `zap`, `p` → `zapped`, `P` / embedded author → `zapper` | implied by type and `via` | `ZapReceiptEventInterface.zappedPost()` / `zappedAuthor()` / `zappedRequestAuthor()` |
-| 5 | `e` / `a` → `delete` | implied | `DeletionRequestEvent.deleteEventIds()` |
-| 1984 | `e` / `a` / `p` → `report` (+ `report` type, §4.3) | implied | `ReportEvent` |
-| 1985 | `e` / `a` / `p` → `label` | implied | `LabelEvent.labeled*()` |
-| 3 | `p` → `follow` | implied | `ContactListEvent` |
-| 10000 | `p` → `mute` | implied | `MuteListEvent.publicMutes()` |
-| 30000, 39089, 39092, 10017, 10020, 10101 | `p` → `member` | implied | NIP-51 `UserTag` |
-| 10001 / 10003, 30001, 30003–30006, 30063, 30267, 10018 | `e` → `pin` / `e` + `a` → `bookmark` | implied | `EventBookmark` / `AddressBookmark` |
-| 10004 / 34550 / 4550 | `a` → `community`; `p` on 34550 → `moderator`; `e` / `a` on 4550 → `approve` | implied | NIP-72 tag classes |
-| 8 / 30008 / 10008 | `a` → `badge`; `p` on 8 → `awarded`; `e` on 30008 / 10008 → `award` | implied | NIP-58 |
-| 30382 / 30383 / 30384 | `d` → `asserts` | implied | NIP-85 `aboutUser()` / `aboutEvent()` / `aboutAddress()` |
-| 40–44 | `e` → `channel`; `e` on 43 → `hide`; `p` on 44 → `mute` | implied | NIP-28 `channelId()` |
-| all others | no role; the edge is typed by tag and kind |  |  |
-
-### 5.4 Worked example
+### 5.3 Worked example
 
 A NIP-10 reply (kind 1, by `A`) with these tags:
 - `["e",R,"wss://a","root"]`
@@ -450,13 +378,13 @@ A NIP-10 reply (kind 1, by `A`) with these tags:
 and content `"… nostr:npub1<Y> … nostr:nsec1<Z> …"` projects to:
 
 ```
-(ev:Event:Stored {id, kind:1, created_at})-[:by_1]->(:User {pubkey:A})
-(ev)-[:e_1 {roles:["root"]}]->(:Event {id:R})
-(ev)-[:e_1 {roles:["reply"]}]->(:Event {id:P})
-(ev)-[:p_1]->(:User {pubkey:X})
-(ev)-[:t_1]->(:Tag {key:"t:nostr"})
-(ev)-[:ref_p_1 {via:"content"}]->(:User {pubkey:Y})
-// x: not allowlisted, dropped. nsec1<Z>: never written.
+(ev:Event:Stored {id, kind:1, created_at})-[:AUTHOR]->(:User {pubkey:A})
+(ev)-[:ROOT {via:"e"}]->(:Event {id:R})
+(ev)-[:PARENT {via:"e"}]->(:Event {id:P})
+(ev)-[:MENTION {via:"p"}]->(:User {pubkey:X})   // PARENT_AUTHOR if X were P's author
+(ev)-[:HASHTAG {via:"t"}]->(:Tag {key:"t:nostr"})
+(ev)-[:MENTION {via:"content"}]->(:User {pubkey:Y})
+// x: a kind 1 does not link its file hashes. nsec1<Z>: never written.
 ```
 
 ---
@@ -515,21 +443,20 @@ transaction intermittently fails ("Node … has been deleted in this transaction
 skipping it. For the same reason, an apply that displaces an incumbent keeps the nodes the new
 version re-references. Edges use dynamic relationship types
 (`CREATE (s)-[:$(row.type)]->(t)`), and the driver retries on deadlock. Each apply first WRITES
-to the event node and its slot anchor (the author `:User` or the `:Address`), taking their
-locks, so two writer processes cannot both win a slot.
+to the event node and its slot anchor (its own `:Address`), taking their locks, so two writer
+processes cannot both win a slot.
 
 **`apply(e)`:**
 1. Already `:Stored` → no-op (idempotent).
-2. If `e` is **replaceable**, the incumbent is the event on `(:User {pubkey})<-[:by_<k>]-(:Stored)`
-   (for a `by_other` kind, the one with the same `kind` property).
-   If `e` is **addressable**, the incumbent is the `VERSION_OF` source on its `:Address`.
+2. If `e` is **replaceable or addressable**, the incumbent is the other `ADDRESS` source on its
+   own `:Address` (`kind:pubkey:` or `kind:pubkey:d`).
    - If the incumbent wins under NIP-01 (higher `created_at`, then the lower id), skip `e`: it
      is a stale delivery.
    - Otherwise, unapply the incumbent in the same transaction.
 3. If `e`'s id was **unapplied within the last hour** (the recent-removal table, below), skip
    it. It is a late put racing its own removal.
-4. Write the node (promoting a stub if one exists), its edges, its `:Address` / `VERSION_OF` /
-   `OWNED_BY`, and its curated values.
+4. Write the node (promoting a stub if one exists), its edges (its `ADDRESS` among them), each
+   new `:Address`'s `AUTHOR` edge to its pubkey, and its curated values.
 
 **`unapply(id)`:**
 - apply the stub rule (§4.1);
@@ -666,7 +593,7 @@ loader does this instead:
      version can both appear; the reconciler's catch-up removes the loser as an extra.
 3. **Import** with `neo4j-admin database import full neo4j …`. The database name goes first,
    because `--relationships` swallows a trailing positional argument. Then run
-   `BulkImport.finalize()`: `SchemaInstaller`, plus `OWNED_BY` for every address, which a
+   `BulkImport.finalize()`: `SchemaInstaller`, plus every address's `AUTHOR` edge, which a
    streaming writer cannot deduplicate.
 4. **Catch up:** reconcile `[T0 − 1 day, now]` plus the dirty hours. Then let the full sweep run,
    which also removes anything the dump caught mid-change.
@@ -734,13 +661,13 @@ label:
 ### 8.4 What callers see
 
 Everything the projection holds, ungated by the relay's observer lens or trust floor. The
-NIP-85 rank on `d_30382` edges lets a *query* apply a trust filter itself.
+NIP-85 rank on `SUBJECT` edges lets a *query* apply a trust filter itself.
 
 **DM metadata is included**, because every kind is projected (§4.4):
 - kind-4 DMs carry sender and recipient in the clear;
 - gift wraps (1059) carry their recipient `p`.
 
-In the graph that becomes `by_4` / `p_4` and `p_1059` edges, and a single query can turn them
+In the graph that becomes `AUTHOR` / `RECIPIENT` edges from kinds 4 and 1059, and a single query can turn them
 into a "who messages whom" graph. The relay already serves the same events by REQ, so nothing
 new is exposed, but bulk analysis becomes trivial. This is one more reason the Cypher audience
 starts at `admin` (Q4). The kind exclude list (§4.4) is the lever if that ever needs to
@@ -773,12 +700,11 @@ the database is unchanged afterwards (counts, `:Meta`, users).
 - **`GET /graph/schema`** serves the live view:
   - `schema_version`;
   - labels and relationship types with counts;
-  - the role table;
-  - the kind registry;
+  - every relation of the vocabulary;
   - the policy.
 - **Versioning.**
-  - Additive changes (a new extractor, role, allowlisted tag, or a kind promoted out of
-    `_other`) bump the minor version. Queries over `_other` should filter by `kind`.
+  - Additive changes (a new relation, a new props field, a newly mapped kind, a new extractor)
+    bump the minor version.
   - Renames and removals bump the major version, and are announced with migration notes.
 
 ### 8.7 Example queries (the reference battery)
@@ -788,45 +714,43 @@ These are also `ReferenceQueriesIT`, run against a fixture graph with known answ
 ```cypher
 // T1 — follower count (O(1) from the dense-node group) and the followers
 MATCH (u:User {pubkey: $pk})
-RETURN COUNT { (u)<-[:p_3]-() } AS followers;
-MATCH (:User {pubkey: $pk})<-[:p_3]-(:Event)-[:by_3]->(f:User) RETURN f;
+RETURN COUNT { (u)<-[:FOLLOW]-() } AS followers;
+MATCH (:User {pubkey: $pk})<-[:FOLLOW]-(:Stored)-[:AUTHOR]->(f:User) RETURN f;
 
-// T2 — follows-of-follows I don't follow, ranked by how many of my follows follow them
-MATCH (me:User {pubkey: $me})<-[:by_3]-(:Event)-[:p_3]->(f:User)
-      <-[:by_3]-(:Event)-[:p_3]->(fof:User)
-WHERE fof <> me AND NOT EXISTS { (me)<-[:by_3]-(:Event)-[:p_3]->(fof) }
+// T2 — follows-of-follows I don't follow, ranked by how many of my follows follow them.
+// A user's current follow list is their `3:<pk>:` address's one version: an index seek.
+MATCH (:Address {id: '3:' + $me + ':'})<-[:ADDRESS]-(mine:Stored)-[:FOLLOW]->(f:User)
+MATCH (:Address {id: '3:' + f.pubkey + ':'})<-[:ADDRESS]-(:Stored)-[:FOLLOW]->(fof:User)
+WHERE fof.pubkey <> $me AND NOT EXISTS { (mine)-[:FOLLOW]->(fof) }
 RETURN fof, count(DISTINCT f) AS via ORDER BY via DESC LIMIT 50;
 
 // T3 — the whole NIP-10 thread under a root (every reply tags the root)
-MATCH (root:Event {id: $id})<-[r:e_1]-(n:Stored)
-WHERE 'root' IN r.roles
+MATCH (root:Event {id: $id})<-[:ROOT]-(n:Stored)
 RETURN n ORDER BY n.created_at;
 
-// T3b — the reply TREE, any depth, following reply edges
-MATCH (root:Event {id: $id}) ((p)<-[r:e_1]-(c:Stored) WHERE 'reply' IN r.roles)+ (leaf)
+// T3b — the reply TREE, any depth, following PARENT edges
+MATCH (root:Event {id: $id}) ((p)<-[:PARENT]-(c:Stored))+ (leaf)
 RETURN leaf;
 
 // T5 — notes my follows zapped this week, by total sats
-MATCH (me:User {pubkey: $me})<-[:by_3]-(:Event)-[:p_3]->(f:User)
-MATCH (f)<-[:P_9735|ref_p_9735]-(z:Stored)-[:e_9735]->(n:Stored {kind: 1})
+MATCH (:Address {id: '3:' + $me + ':'})<-[:ADDRESS]-(:Stored)-[:FOLLOW]->(f:User)
+MATCH (f)<-[:ZAP_SENDER]-(z:Stored)-[:ZAPPED]->(n:Stored {kind: 1})
 WHERE z.created_at >= $since
 RETURN n, sum(z.msats) AS msats, count(DISTINCT f) AS zappers ORDER BY msats DESC LIMIT 50;
 
-// T9 — who NIP-85 provider S ranks >= 80, and how many of my follows follow each
-MATCH (:User {pubkey: $service})<-[:by_30382]-(:Event)-[a:d_30382]->(u:User)
+// T9 — who NIP-85 provider S ranks >= 80
+MATCH (:User {pubkey: $service})<-[:AUTHOR]-(:Stored {kind: 30382})-[a:SUBJECT]->(u:User)
 WHERE a.rank >= 80
-OPTIONAL MATCH (me:User {pubkey: $me})<-[:by_3]-(:Event)-[:p_3]->(f:User)
-      <-[:by_3]-(:Event)-[:p_3]->(u)
-RETURN u, a.rank, count(DISTINCT f) AS followedByMyFollows ORDER BY a.rank DESC;
+RETURN u, a.rank ORDER BY a.rank DESC;
 
 // T11 — hashtags used alongside #bitcoin in the last day
-MATCH (:Tag {key: 't:bitcoin'})<-[:t_1]-(n:Stored)-[:t_1]->(o:Tag)
+MATCH (:Tag {key: 't:bitcoin'})<-[:HASHTAG]-(n:Stored)-[:HASHTAG]->(o:Tag)
 WHERE n.created_at >= $since AND o.key <> 't:bitcoin'
 RETURN o.value, count(*) AS uses ORDER BY uses DESC LIMIT 20;
 
 // Hybrid — full-text search in Vespa first (ids from a NIP-50 REQ), then graph in Cypher
 UNWIND $ids AS id
-MATCH (n:Event:Stored {id: id})<-[:e_7]-(:Event)-[:by_7]->(r:User)
+MATCH (n:Event:Stored {id: id})<-[:REACTED]-(:Stored)-[:AUTHOR]->(r:User)
 RETURN n, count(DISTINCT r) AS reactors ORDER BY reactors DESC;
 ```
 
@@ -880,9 +804,9 @@ RETURN n, count(DISTINCT r) AS reactors ORDER BY reactors DESC;
 
 | Gate | Needs | Asserts |
 |---|---|---|
-| `./gradlew build` (unit) | Nothing | **Derivation:** one golden test per `appendix-providers.md` row, link rules, extractors, role table, and invariants (every single-letter tag lands in exactly one place or is dropped by policy; no self-edges; **no `nsec` ever becomes a `:User`**). **Projector semantics on `InMemoryGraphIndex`:** random interleavings of two feeds' puts and removes, plus drops, converge to the source's state after one reconcile. The source is Quartz's in-memory SQLite `EventStore` fed the same events. **`CypherGuard`** plan-walk unit tests on captured plans. **`ModuleBoundariesTest`, `PortDecoratorsTest`.** |
+| `./gradlew build` (unit) | Nothing | **Derivation:** golden tests per Quartz package (`kinds/<Package>LinksTest`), `KindMappersCoverageTest` (every Quartz class has a mapper), `MapperCodeReadsTagParsersTest`, extractors, and invariants (every type is a vocabulary relation; no self-edges; **no `nsec` ever becomes a node or a property**). **Projector semantics on `InMemoryGraphIndex`:** random interleavings of two feeds' puts and removes, plus drops, converge to the source's state after one reconcile. The source is Quartz's in-memory SQLite `EventStore` fed the same events. **`CypherGuard`** plan-walk unit tests on captured plans. **`ModuleBoundariesTest`, `PortDecoratorsTest`.** |
 | `spotlessCheck` | Nothing | ktlint plus the MIT header |
-| `-Pintegration` | Docker (`neo4j:2026.09-community`) | **`ProjectionIT`:** the same corpus and interleavings through `Neo4jGraphIndex` give `edgesOf(id)` identical to `InMemoryGraphIndex` for every id. **`CypherGuardIT`** (§8.5). **`ReferenceQueriesIT`** (§8.7). **`BulkImportIT`:** bulk path = online path. **`KindRegistryMigrationIT`.** |
+| `-Pintegration` | Docker (`neo4j:2026.09-community`) | **`ProjectionIT`:** the same corpus and interleavings through `Neo4jGraphIndex` give `edgesOf(id)` identical to `InMemoryGraphIndex` for every id. **`CypherGuardIT`** (§8.5). **`ReferenceQueriesIT`** (§8.7). **`BulkImportIT`:** bulk path = online path. |
 | vespa-eventstore | Its own gates | `ObservedEventIndex` in `PortDecoratorsTest`. An IT: every mutation style (insert, supersession, kind 5, vanish, expiry, orphan sweep) reaches the observer, with exactly the removed ids. |
 | vespa-relay `GraphProjectionIT` | Vespa + Neo4j | The relay's ingest with injected drops and a Neo4j pause → equal id sets after one reconcile, and client `OK` latency unaffected while Neo4j is paused. |
 
@@ -902,7 +826,7 @@ RETURN n, count(DISTINCT r) AS reactors ORDER BY reactors DESC;
 ## 13. Later
 
 - **Query limits**, from production measurements.
-- **Trust-aware views** (observer lens over the `d_30382` ranks).
+- **Trust-aware views** (observer lens over the `SUBJECT` ranks).
 - **`:Relay` nodes.**
 - **A bounded traversal DSL** for the Nostr wire (a REQ extension or a NIP-90 DVM).
 - **More extractors**, as queries ask for them.

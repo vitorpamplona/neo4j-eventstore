@@ -26,7 +26,6 @@ import com.vitorpamplona.neo4j.eventstore.cypher.ServerSafety
 import com.vitorpamplona.neo4j.eventstore.engine.client.Neo4jGraphIndex
 import com.vitorpamplona.neo4j.eventstore.engine.client.SchemaInstaller
 import com.vitorpamplona.neo4j.eventstore.engine.schema.GraphPolicy
-import com.vitorpamplona.neo4j.eventstore.engine.schema.KindRegistry
 import com.vitorpamplona.neo4j.eventstore.sim.GraphCorpus
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Tag
@@ -121,7 +120,7 @@ class CypherGuardIT {
     fun hostileQueriesNeverChangeTheDatabase() =
         runBlocking {
             val driver = Neo4jTestServer.freshDriver()
-            SchemaInstaller(driver).install(KindRegistry.quartzKnownKinds(), GraphPolicy.Default)
+            SchemaInstaller(driver).install(GraphPolicy.Default)
             val corpus = GraphCorpus(5)
             Neo4jGraphIndex(driver).apply((0 until 60).map { corpus.next() })
             val service = CypherService(driver)
@@ -141,7 +140,7 @@ class CypherGuardIT {
     fun ordinaryReadsAndIntrospectionStillWork() =
         runBlocking {
             val driver = Neo4jTestServer.freshDriver()
-            SchemaInstaller(driver).install(KindRegistry.quartzKnownKinds(), GraphPolicy.Default)
+            SchemaInstaller(driver).install(GraphPolicy.Default)
             val corpus = GraphCorpus(6)
             Neo4jGraphIndex(driver).apply((0 until 30).map { corpus.next() })
             val service = CypherService(driver)

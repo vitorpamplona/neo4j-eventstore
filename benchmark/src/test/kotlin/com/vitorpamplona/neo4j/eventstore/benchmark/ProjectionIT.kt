@@ -26,7 +26,6 @@ import com.vitorpamplona.neo4j.eventstore.engine.client.Neo4jGraphIndex
 import com.vitorpamplona.neo4j.eventstore.engine.client.SchemaInstaller
 import com.vitorpamplona.neo4j.eventstore.engine.memory.InMemoryGraphIndex
 import com.vitorpamplona.neo4j.eventstore.engine.schema.GraphPolicy
-import com.vitorpamplona.neo4j.eventstore.engine.schema.KindRegistry
 import com.vitorpamplona.neo4j.eventstore.reconcile.MirrorReconciler
 import com.vitorpamplona.neo4j.eventstore.sim.GraphCorpus
 import com.vitorpamplona.neo4j.eventstore.sim.GraphCorpus.Companion.SIG
@@ -81,7 +80,7 @@ class ProjectionIT {
     fun neo4jMatchesTheExecutableSpecOnRandomHistories() =
         runBlocking {
             val driver = Neo4jTestServer.freshDriver()
-            SchemaInstaller(driver).install(KindRegistry.quartzKnownKinds(), GraphPolicy.Default)
+            SchemaInstaller(driver).install(GraphPolicy.Default)
             for (seed in 0 until 12) {
                 driver.session().use { it.run("MATCH (n) WHERE NOT n:Meta DETACH DELETE n").consume() }
                 val random = Random(seed)
@@ -118,7 +117,7 @@ class ProjectionIT {
     fun visitIdsPagesInCreatedAtThenIdOrder() =
         runBlocking {
             val driver = Neo4jTestServer.freshDriver()
-            SchemaInstaller(driver).install(KindRegistry.quartzKnownKinds(), GraphPolicy.Default)
+            SchemaInstaller(driver).install(GraphPolicy.Default)
             val corpus = GraphCorpus(99)
             val events = (0 until 120).map { corpus.next() }.filter { it.kind == 1 || it.kind == 7 }
             val neo4j = Neo4jGraphIndex(driver)
@@ -139,7 +138,7 @@ class ProjectionIT {
     fun supersedingAVersionThatTheNewOneCites(): Unit =
         runBlocking {
             val driver = Neo4jTestServer.freshDriver()
-            SchemaInstaller(driver).install(KindRegistry.quartzKnownKinds(), GraphPolicy.Default)
+            SchemaInstaller(driver).install(GraphPolicy.Default)
             val author = hex("author")
             val v1 = Event(hex("v1"), author, 100, 30023, arrayOf(arrayOf("d", "doc")), "", SIG)
             val v2 = Event(hex("v2"), author, 200, 30023, arrayOf(arrayOf("d", "doc"), arrayOf("e", v1.id)), "", SIG)

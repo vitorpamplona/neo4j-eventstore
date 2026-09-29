@@ -1,16 +1,21 @@
 # Graph schema reference
 
-**Schema version 1.1** (the live value is in `:Meta.schema_version` and `GET /graph/schema`).
+**Schema version 2.0** (the live value is in `:Meta.schema_version` and `GET /graph/schema`).
 
-This is the contract for anyone writing Cypher against the graph. Labels, relationship types,
-property names and role strings are API:
-- **additive** changes bump the minor version: a new role, a new curated value, a new allowlisted
-  tag, or a kind promoted out of `_other`;
+This is the contract for anyone writing Cypher against the graph. Labels, relationship types and
+property names are API:
+- **additive** changes bump the minor version: a new relation, a new props field, a newly mapped
+  kind, a new curated value;
 - **renames and removals** bump the major version, and are announced with migration notes.
 
 The graph is a **projection** of the events the relay's Vespa store holds. It keeps no event
 bodies: an `:Event:Stored` node that a query returns is hydrated into the full NIP-01 event
 unless the request says `"hydrate": false`.
+
+**2.0 in one line:** a relationship's type says what its target IS to the event — `ROOT`,
+`PARENT`, `REACTED`, `FOLLOW`, `REPORTED_USER` — instead of which tag carried it (1.x's `e_1`,
+`p_3`, `p_1984`). What each kind's references mean is decided once, per Quartz event class, in
+the [link vocabulary](vocabulary.md).
 
 ---
 
@@ -21,90 +26,107 @@ unless the request says `"hydrate": false`.
 | `:Event:Stored` | `id` (64-hex) | `kind`, `created_at`, `d` (addressable kinds), `expires_at` (NIP-40), and curated values (below) | An event the relay holds |
 | `:Event` (without `:Stored`) | `id` | — | A **stub**: an id something references that the relay does not hold. Filter with `NOT n:Stored` (e.g. "most-cited missing events"). |
 | `:User` | `pubkey` (64-hex) | `name`, `display_name`, `nip05` (from the current kind 0) | Anyone who authored or was referenced |
-| `:Address` | `id` = `kind:pubkey:d` | `kind`, `pubkey`, `d` | Every addressable event (30000–39999), plus any address something references (including `10002:<pk>:`-style replaceable addresses). Kinds are 0–65535. A `d` longer than 1024 UTF-8 bytes appears as `sha256:<hex of the d>` (the key must stay indexable); it is still one node per distinct `d`. |
-| `:Tag` | `key` = `name:value` | `name`, `value` | Non-reference single-letter tags, for the allowlisted names `t`, `i`, `k`, `l`, `L`, `r`, `g` only. Values of 256 bytes or less. |
+| `:Address` | `id` = `kind:pubkey:d` | `kind`, `pubkey`, `d` | Every replaceable (`3:<pk>:`, `10002:<pk>:`) and addressable (`30023:<pk>:<d>`) event's own address, plus any address something references. Kinds are 0–65535. A `d` longer than 1024 UTF-8 bytes appears as `sha256:<hex of the d>` (the key must stay indexable); it is still one node per distinct `d`. |
+| `:Tag` | `key` = `name:value` | `name`, `value` | A value a kind links that is not an event, user or address: a hashtag (`t:nostr`), a URL (`r:https://…`), an external id (`i:isbn:…`), a group (`h:<id>`), a kind (`k:1`). `name` is the tag it was written in. Values of 256 bytes or less. |
 
 **An event's author is an edge, not a property.** Filter by author from the user:
-`(:User {pubkey: $pk})<-[:by_1]-(n)`.
+`(:User {pubkey: $pk})<-[:AUTHOR]-(n:Stored)`.
 
-**Replaceable events** (0, 3, 10000–19999) have no `:Address` node unless something references
-their address. A user's current follow list is `(:User)<-[:by_3]-(list)`, and there is exactly
-one.
+**Replaceable and addressable events hang off their address.** Each version points at its own
+`:Address` through `ADDRESS`, and the projection keeps exactly one held version per address. A
+user's current follow list is one index seek away:
+`(:Address {id: '3:' + $pk + ':'})<-[:ADDRESS]-(list:Stored)`. Prefer that anchor over
+`(u)<-[:AUTHOR]-(:Stored {kind: 3})`, which walks everything the user ever signed.
 
 ## Relationships
 
-Every relationship starts at an `:Event:Stored`, except `OWNED_BY`.
+Every relationship starts at an `:Event:Stored`, except an address's `AUTHOR` (its pubkey).
 
-| Type | From → to | Meaning |
+The **type** is a relation of the [vocabulary](vocabulary.md): what the target is to the event
+that states it. One relation per role across kinds: `PARENT` is a note reply's parent, a NIP-22
+comment's parent item and a git reply's; the source node's `kind` says which, and a query that
+cares filters on it (`(c:Stored {kind: 1111})-[:PARENT]->(x)`). The full catalogue — 172
+relations, each with its targets, meaning and kinds — is in [`vocabulary.md`](vocabulary.md#the-vocabulary),
+and `GET /graph/schema` lists them. The ones most queries start from:
+
+| Relation | From → to | Meaning |
 |---|---|---|
-| `by_<k>` | Event → User | Authorship; `<k>` is the event's kind, e.g. `by_1`, `by_3`, `by_30023` |
-| `<t>_<k>` | Event → Event / User / Address / Tag | The event (kind `<k>`) has the literal single-letter tag `<t>`. Examples: `p_3` (a follow), `e_7` (a reaction's target), `q_1` (a quote), `E_1111` (a NIP-22 root), `t_1` (a hashtag), `d_30382` (a NIP-85 subject). |
-| `ref_<f>_<k>` | Event → Event / User / Address | A **derived** reference of family `e`, `p` or `a` that is not a literal single-letter tag. `via` says where it came from. |
-| `VERSION_OF` | Event → Address | The address's current version. There is at most one. |
-| `OWNED_BY` | Address → User | The address's pubkey |
+| `AUTHOR` | Event → User; Address → User | The signer; an address's pubkey |
+| `ADDRESS` | Event → Address | A replaceable / addressable event's own address (at most one held version per address) |
+| `ROOT`, `PARENT` | Event → Event / Address / Tag | The thread root and the direct parent (NIP-10 notes, NIP-22 comments and their `I` scopes, chat, git, …). A direct reply to the root has both. |
+| `ROOT_AUTHOR`, `PARENT_AUTHOR` | Event → User | Their authors, where the event names them (a `p` on a note is `PARENT_AUTHOR` only when it is the parent's author) |
+| `MENTION`, `QUOTE` | Event → Event / User / Address | A reference without a structural role (a tag, or a `nostr:` URI in the content); a NIP-18 `q` |
+| `REACTED`, `REACTED_AUTHOR` | Event → Event / Address; → User | A reaction's target (NIP-25: the LAST `e`/`a`) and its author (the last `p`) |
+| `REPOSTED`, `REPOSTED_AUTHOR` | Event → Event / Address; → User | A repost's original and its author |
+| `ZAPPED`, `ZAP_RECIPIENT`, `ZAP_SENDER` | Event → Event / Address; → User | A zap request's / receipt's content, recipient and (receipt `P`) sender |
+| `FOLLOW` | Event → User | Kind 3 only: the social graph. Other follow-like lists are `SUBSCRIBED`. |
+| `MUTE`, `BOOKMARK`, `PIN`, `MEMBER` | Event → … | NIP-51 lists name their entries as the list does |
+| `REPORTED_USER`, `REPORTED`, `REPORTED_AUTHOR` | Event → User; → Event / Address / Tag; → User | NIP-56: a complaint about the PERSON; the reported content; the author of reported content |
+| `DELETED` | Event → Event / Address | NIP-09 |
+| `LABELED` | Event → … | NIP-32 |
+| `SUBJECT` | Event → User / Event / Address / Tag | A NIP-85 assertion's subject (its `d`), with the scores |
+| `SERVICE_PROVIDER` | Event → User | A 10040's trust services (`via` names the metric, e.g. `30382:rank`); a NIP-90 request's DVMs |
+| `HASHTAG`, `TAG` | Event → Tag | A `t` (lowercased), and the other value tags a kind opts into (`i`, `k`, `r`, `g`, …) |
+| `GROUP`, `COMMUNITY` | Event → Tag; → Address | A NIP-29 / Marmot / Buzz group (its `h`); a NIP-72 community |
+| `CLIENT`, `ZAP_SPLIT`, `EMOJI_SET` | Event → Address; → User; → Address | Tags any event may carry: NIP-89 `client`, NIP-57 zap splits, a NIP-30 emoji's set |
 
-- **Case matters**: `e_1111` is a NIP-22 reply and `E_1111` is a NIP-22 root.
-- **Kinds the pinned Quartz does not know** share `<t>_other`, `ref_<f>_other` and `by_other`,
-  each with a `kind` property. When a Quartz upgrade learns such a kind, its edges move to their
-  own type, which is a minor version bump. Queries over `_other` should filter by `kind`.
-- **Counts are O(1).** `COUNT { (u)<-[:p_3]-() }` (followers) is read from Neo4j's per-type degree
-  store, so it costs the same for an account with one follower or a million.
+- **Counts are O(1).** `COUNT { (u)<-[:FOLLOW]-() }` (followers) is read from Neo4j's per-type
+  degree store, so it costs the same for an account with one follower or a million. That is why
+  the vocabulary splits a relation wherever queries separate its meanings on one target type:
+  counting a relation is constant-time, filtering on a property reads every edge.
+- **No fallback.** A kind the pinned Quartz does not know states only `AUTHOR`, `ADDRESS` and the
+  every-kind tags: its other tags mean nothing the projection can vouch for.
 
 ### Relationship properties
 
-| Property | Where | Meaning |
-|---|---|---|
-| `roles` | Only where the type leaves the role open (below) | e.g. `["root", "reply"]` |
-| `via` | `ref_…` | `content` (a `nostr:` link in the text), `embedded` (an event embedded in the content, e.g. a repost), `description` (the zap request inside a receipt), or the multi-letter tag that carried it (`zap`, `pinned`, `30382:rank`, …). One target reached two ways is two relationships, one per `via` (a 10040 naming one service for `30382:rank` and `30382:followers`). |
-| `kind` | `_other` types | The source kind |
-| `report` | `p_1984`, `e_1984`, `a_1984` | The report's CATEGORY, as Quartz reads it: `spam`, `impersonation`, `illegal`, `malware`, `nudity`, `profanity`, `harassment`, `violence` or `other`. Localized labels fold in (`Spam 📣` is `spam`); a type Quartz does not know is `other`. |
-| `report_raw` | `p_1984`, `e_1984`, `a_1984` | The type AS WRITTEN, trimmed and lowercased, up to 64 bytes (`swearing`, `ai-generated`, `spam 📣`). Absent when the report wrote none. |
-| `scope` | `p_1984` | What the report is about: `user` (it names no event, address or blob, so it is a standing complaint about the person), or `event`, `address`, `blob` (it reports that content, and this `p` is its author). `address` wins when a report names a version and its address. |
-| `rank`, `followers` | `d_30382` | The NIP-85 assertion's scores for that user |
+Every link a tag or the content states carries **`via`**: the tag name (`e`, `p`, `a`, `q`,
+`30382:rank`, …) or `content` for a NIP-27 `nostr:` URI in the text. One target reached two ways
+is two relationships (a 10040 naming one service for `30382:rank` and `30382:followers`).
 
-### Roles
+The relations below carry **typed props** (`vocab/props`; absent values are left out):
 
-**Stored roles** apply where the type admits more than one role. Test them with
-`'reply' IN r.roles`.
-
-| Types | Roles |
+| Relations | Properties |
 |---|---|
-| `e_<k>` for kinds 1, 42, 1311, 2004, 30818, 1617, 1630–1633 | `root` (the thread root); `reply` (the **direct parent**: the reply-marked `e`, or the root when there is none, as Quartz's `replyingTo()` reads it); `mention`; `fork`. A direct reply to the root has `["root","reply"]` on that one edge. |
-| `e_6`, `a_6`, `e_16`, `a_16` | `repost` (the last `e` / `a`) or `context` |
-| `e_7`, `a_7` | `reaction` (the last `e` / `a`, NIP-25's target) or `context` |
-| `ref_p_9735` with `via: "description"` | `zapper` (the zap sender, from the embedded request) |
+| `ACTOR` | `path` (string) |
+| `AUCTION` | `amount` (float) |
+| `AUDITED` | `action` (string) |
+| `BID` | `status` (string), `duration_extension` (integer) |
+| `OPPONENT`, `WINNER` | `result` (string), `termination` (string) |
+| `COLLABORATED`, `COLLABORATED_AUTHOR` | `roles` (list), `status` (string) |
+| `CREDITED` | `credit` (string) |
+| `FOUND` | `verified` (boolean) |
+| `RECIPIENT`, `AGENT` | `frame` (string) |
+| `ITEM` | `polarity` (float) |
+| `LABELED` | `labels` (list) |
+| `MEMBER` | `roles` (list), `order` (integer), `level` (integer), `title` (string), `score` (integer) |
+| `ARCHIVED`, `BANNED`, `TIMED_OUT`, `UNARCHIVED` | `reason` (string), `expiration` (integer) |
+| `MUTE` | `muted_kind` (integer) |
+| `CURATED`, `PIN` | `order` (integer) |
+| `OWNER` | `conditions` (string) |
+| `PARTICIPANT` | `roles` (list), `proof` (string) |
+| `RECOMMENDED` | `platform` (string) |
+| `POLL` | `responses` (list) |
+| `TAGGED` | `x` (integer), `y` (integer) |
+| `RATED`, `RATED_AUTHOR` | `mark` (string), `stars` (float) |
+| `SITE_MANIFEST` | `release` (string) |
+| `REPORTED_USER`, `REPORTED`, `REPORTED_AUTHOR` | `report` (string), `report_raw` (string) |
+| `RESOLVED` | `status` (string), `action` (string), `reason` (string) |
+| `HIGHLIGHTED_AUTHOR`, `ADDED_USER`, `ADMIN`, `ALLOWED`, `PODCAST_AUTHOR`, `ROLE_CHANGED` | `roles` (list) |
+| `CALENDAR_EVENT` | `status` (string), `fb` (string) |
+| `SERVICE_PROVIDER` | `service` (string) |
+| `CONFIRMED`, `REQUEST` | `status` (string) |
+| `SUBJECT` | `rank` (integer), `followers` (integer), `hops` (integer), `first_created_at` (integer), `post_cnt` (integer), `reply_cnt` (integer), `reactions_cnt` (integer), `zap_amt_recd` (integer), `zap_amt_sent` (integer), `zap_cnt_recd` (integer), `zap_cnt_sent` (integer), `zap_avg_amt_day_recd` (integer), `zap_avg_amt_day_sent` (integer), `reports_cnt_recd` (integer), `reports_cnt_sent` (integer), `active_hours_start` (integer), `active_hours_end` (integer), `comment_cnt` (integer), `quote_cnt` (integer), `repost_cnt` (integer), `reaction_cnt` (integer), `zap_cnt` (integer), `zap_amount` (integer) |
+| `VIEWED` | `phase` (string) |
+| `VOTED` | `direction` (string) |
+| `WOT_ROOT` | `depth` (integer) |
+| `ZAPPED`, `ZAP_RECIPIENT` | `msats` (integer) |
+| `ZAP_SPLIT` | `weight` (float) |
 
-**Implied roles** are not stored; the type says them:
-
-| Type | Role |
-|---|---|
-| `p_1`, `p_42`, … (threaded kinds) | mention |
-| `E_1111` / `A_1111`, `e_1111` / `a_1111` | root / reply |
-| `P_1111`, `p_1111` | root_author / reply_author |
-| `q_<any>` | quote |
-| `p_6`, `p_16` | reposted_author |
-| `p_7` | reacted_author |
-| `e_9734` / `e_9735` / `a_9734` / `a_9735` | zap |
-| `p_9734`, `p_9735` | zapped (the recipient) |
-| `P_9735` | zapper |
-| `e_5`, `a_5` | delete |
-| `e_1984`, `a_1984`, `p_1984` | report |
-| `e_1985`, `a_1985`, `p_1985` | label |
-| `p_3` | follow |
-| `p_10000` | mute |
-| `p_30000`, `p_39089`, `p_39092`, `p_10017`, `p_10020`, `p_10101` | member |
-| `e_10001` | pin |
-| `e_10003` / `a_10003`, and the NIP-51 bookmark and curation sets | bookmark |
-| `a_10004`, `a_34550`, `a_4550` | community |
-| `p_34550` | moderator |
-| `e_4550` | approve |
-| `a_8`, `a_30008`, `a_10008` | badge |
-| `p_8` | awarded |
-| `e_30008`, `e_10008` | award |
-| `d_30382`, `d_30383`, `d_30384` | asserts (the NIP-85 subject) |
-| `e_41` | channel |
-| `e_43` | hide |
-| `p_44` | mute |
+`report` is the report's CATEGORY as Quartz reads it (`spam`, `impersonation`, `illegal`,
+`malware`, `nudity`, `profanity`, `harassment`, `violence`, or `other` for a type Quartz does not
+know; localized labels fold in: `Spam 📣` is `spam`); `report_raw` is the type AS WRITTEN,
+trimmed and lowercased (`swearing`, `ai-generated`), absent when the report wrote none. Integers
+are Cypher integers; lists are string lists (test membership with `'admin' IN r.roles`).
 
 ### Curated values on nodes
 
@@ -122,19 +144,18 @@ Every relationship starts at an `:Event:Stored`, except `OWNED_BY`.
 Amounts above 21M BTC (2.1×10¹⁸ msats) are not stored, so `sum(z.msats)` over real zaps cannot
 overflow.
 
+
 ### Reports (NIP-56), in one place
 
-A report reaches its subjects through `p_1984`, `e_1984` and `a_1984`. Three questions come up in
-nearly every report query, and each is a property of the edge, so it needs no second hop:
-- **About the person, or about their content?** `p_1984.scope`. A report of a note tags the note
-  (`e`) and its author (`p`). Only `scope: 'user'` is a complaint about the person themselves.
-- **Which category?** `report`, from a fixed vocabulary. Filter on it to keep the categories that
-  matter and drop the minor types clients invent, which all land in `other`.
-- **Which exact type?** `report_raw`, the text the client wrote.
+A report reaches its subjects through three relations, and the question every report query
+asks — about the person, or about their content? — is the relation itself:
+- `REPORTED_USER`: the report names no content, so it is a standing complaint about the person;
+- `REPORTED`: the reported event, address or blob;
+- `REPORTED_AUTHOR`: the author of reported content (the report's `p` beside its `e` / `a` / `x`).
 
-Relationship indexes cover `p_1984 (scope, report)`, `p_1984 (report_raw)`, `e_1984 (report)` and
-`a_1984 (report)`, so a report query that is not anchored on one user still seeks rather than
-scans.
+Each carries `report` and `report_raw`. Relationship indexes cover `REPORTED_USER (report)`,
+`REPORTED_USER (report_raw)`, `REPORTED_AUTHOR (report)` and `REPORTED (report)`, so a report
+query that is not anchored on one user still seeks rather than scans.
 
 ### Internal labels
 
@@ -148,79 +169,77 @@ in the request's `params`.
 
 ```cypher
 // T1 — follower count, and the followers
-MATCH (u:User {pubkey: $pk}) RETURN COUNT { (u)<-[:p_3]-() } AS followers;
-MATCH (:User {pubkey: $pk})<-[:p_3]-(:Event)-[:by_3]->(f:User) RETURN f;
+MATCH (u:User {pubkey: $pk}) RETURN COUNT { (u)<-[:FOLLOW]-() } AS followers;
+MATCH (:User {pubkey: $pk})<-[:FOLLOW]-(:Stored)-[:AUTHOR]->(f:User) RETURN f;
 
 // T2 — follows-of-follows I don't follow, ranked by how many of my follows follow them
-MATCH (me:User {pubkey: $me})<-[:by_3]-(:Event)-[:p_3]->(f:User)<-[:by_3]-(:Event)-[:p_3]->(fof:User)
-WHERE fof <> me AND NOT EXISTS { (me)<-[:by_3]-(:Event)-[:p_3]->(fof) }
+MATCH (:Address {id: '3:' + $me + ':'})<-[:ADDRESS]-(mine:Stored)-[:FOLLOW]->(f:User)
+MATCH (:Address {id: '3:' + f.pubkey + ':'})<-[:ADDRESS]-(:Stored)-[:FOLLOW]->(fof:User)
+WHERE fof.pubkey <> $me AND NOT EXISTS { (mine)-[:FOLLOW]->(fof) }
 RETURN fof, count(DISTINCT f) AS via ORDER BY via DESC LIMIT 50;
 
 // T3 — every note in a thread (every NIP-10 reply tags the root)
-MATCH (root:Event {id: $id})<-[r:e_1]-(n:Stored) WHERE 'root' IN r.roles
+MATCH (root:Event {id: $id})<-[:ROOT]-(n:Stored)
 RETURN n ORDER BY n.created_at;
 
 // T3b — the reply TREE, any depth, through direct-parent edges
-MATCH (root:Event {id: $id}) ((p)<-[r:e_1]-(c:Stored) WHERE 'reply' IN r.roles)+ (leaf)
+MATCH (root:Event {id: $id}) ((p)<-[:PARENT]-(c:Stored))+ (leaf)
 RETURN leaf;
 
 // T4 — notes my follows reacted to this week, by how many of them
-MATCH (me:User {pubkey: $me})<-[:by_3]-(:Event)-[:p_3]->(f:User)<-[:by_7]-(r:Stored)-[x:e_7]->(n:Stored)
-WHERE r.created_at >= $since AND 'reaction' IN x.roles
+MATCH (:Address {id: '3:' + $me + ':'})<-[:ADDRESS]-(:Stored)-[:FOLLOW]->(f:User)
+MATCH (f)<-[:AUTHOR]-(r:Stored {kind: 7})-[:REACTED]->(n:Stored)
+WHERE r.created_at >= $since
 RETURN n, count(DISTINCT f) AS reactors ORDER BY reactors DESC LIMIT 50;
 
 // T5 — notes my follows zapped this week, by total sats
-MATCH (me:User {pubkey: $me})<-[:by_3]-(:Event)-[:p_3]->(f:User)
-MATCH (f)<-[:P_9735|ref_p_9735]-(z:Stored)-[:e_9735]->(n:Stored {kind: 1})
+MATCH (:Address {id: '3:' + $me + ':'})<-[:ADDRESS]-(:Stored)-[:FOLLOW]->(f:User)
+MATCH (f)<-[:ZAP_SENDER]-(z:Stored)-[:ZAPPED]->(n:Stored {kind: 1})
 WHERE z.created_at >= $since
 RETURN n, sum(z.msats) AS msats, count(DISTINCT f) AS zappers ORDER BY msats DESC LIMIT 50;
 
 // T6 — articles quoted by my follows' notes
-MATCH (me:User {pubkey: $me})<-[:by_3]-(:Event)-[:p_3]->(f:User)<-[:by_1]-(:Stored)-[:q_1]->(a:Address)<-[:VERSION_OF]-(article:Stored)
+MATCH (:Address {id: '3:' + $me + ':'})<-[:ADDRESS]-(:Stored)-[:FOLLOW]->(f:User)
+MATCH (f)<-[:AUTHOR]-(:Stored {kind: 1})-[:QUOTE]->(a:Address)<-[:ADDRESS]-(article:Stored)
 RETURN article, count(*) AS quotes ORDER BY quotes DESC LIMIT 50;
 
-// T7 — users awarded badge B who also wear it
-MATCH (b:Address {id: $badge})<-[:a_8]-(:Stored)-[:p_8]->(u:User)
-WHERE EXISTS { (u)<-[:by_30008|by_10008]-(:Stored)-[:a_30008|a_10008]->(b) }
-RETURN u;
-
 // T8 — a community's approved posts and their authors
-MATCH (c:Address {id: $community})<-[:a_4550]-(:Stored)-[:e_4550]->(post:Stored)-[b]->(author:User)
-WHERE type(b) STARTS WITH 'by_'
+MATCH (c:Address {id: $community})<-[:COMMUNITY]-(approval:Stored {kind: 4550})-[:APPROVED]->(post:Stored)-[:AUTHOR]->(author:User)
 RETURN post, author;
 
 // T9 — who NIP-85 service S ranks >= 80
-MATCH (:User {pubkey: $service})<-[:by_30382]-(:Event)-[a:d_30382]->(u:User)
+MATCH (:User {pubkey: $service})<-[:AUTHOR]-(:Stored {kind: 30382})-[a:SUBJECT]->(u:User)
 WHERE a.rank >= 80
 RETURN u, a.rank ORDER BY a.rank DESC;
 
 // T10 — events my follows cite that the relay does not hold
-MATCH (me:User {pubkey: $me})<-[:by_3]-(:Event)-[:p_3]->(f:User)<-[b]-(n:Stored)-[r]->(missing:Event)
-WHERE type(b) STARTS WITH 'by_' AND NOT missing:Stored AND (type(r) STARTS WITH 'e_' OR type(r) STARTS WITH 'q_')
+MATCH (:Address {id: '3:' + $me + ':'})<-[:ADDRESS]-(:Stored)-[:FOLLOW]->(f:User)
+MATCH (f)<-[:AUTHOR]-(n:Stored)-[:MENTION|QUOTE|PARENT|ROOT]->(missing:Event)
+WHERE NOT missing:Stored
 RETURN missing.id, count(*) AS citations ORDER BY citations DESC LIMIT 50;
 
 // T11 — hashtags used alongside #bitcoin in the last day
-MATCH (:Tag {key: 't:bitcoin'})<-[:t_1]-(n:Stored)-[:t_1]->(o:Tag)
+MATCH (:Tag {key: 't:bitcoin'})<-[:HASHTAG]-(n:Stored)-[:HASHTAG]->(o:Tag)
 WHERE n.created_at >= $since AND o.key <> 't:bitcoin'
 RETURN o.value, count(*) AS uses ORDER BY uses DESC LIMIT 20;
 
 // T12 — who reported X as a PERSON (not one of X's notes), among the people I follow
-MATCH (:User {pubkey: $x})<-[r:p_1984 {scope: 'user'}]-(:Stored)-[:by_1984]->(reporter:User)
-WHERE EXISTS { (:User {pubkey: $me})<-[:by_3]-(:Event)-[:p_3]->(reporter) }
+MATCH (:User {pubkey: $x})<-[r:REPORTED_USER]-(:Stored)-[:AUTHOR]->(reporter:User)
+WHERE EXISTS { (:Address {id: '3:' + $me + ':'})<-[:ADDRESS]-(:Stored)-[:FOLLOW]->(reporter) }
 RETURN reporter, r.report;
 
 // T13 — users with reports that count: the standard categories only, so types clients
 // invented for minor things (`swearing` is category `other`) drop out
-MATCH (u:User)<-[r:p_1984]-(rep:Stored)
+MATCH (u:User)<-[r:REPORTED_USER|REPORTED_AUTHOR]-(rep:Stored)
 WHERE r.report IN ['impersonation', 'spam', 'illegal', 'malware'] AND rep.created_at >= $since
-RETURN u, r.scope AS scope, count(*) AS reports ORDER BY reports DESC LIMIT 50;
+RETURN u, type(r) AS about, count(*) AS reports ORDER BY reports DESC LIMIT 50;
 
 // T14 — one invented type, by its text
-MATCH (:Stored)-[r:e_1984 {report_raw: 'swearing'}]->(n:Stored) RETURN n;
+MATCH (:Stored)-[r:REPORTED {report_raw: 'swearing'}]->(n:Stored) RETURN n;
 
 // Hybrid — full-text search in Vespa first (a NIP-50 REQ), then the graph
 UNWIND $ids AS id
-MATCH (n:Event:Stored {id: id})<-[:e_7]-(:Event)-[:by_7]->(r:User)
+MATCH (n:Event:Stored {id: id})<-[:REACTED]-(:Stored)-[:AUTHOR]->(r:User)
 RETURN n, count(DISTINCT r) AS reactors ORDER BY reactors DESC;
 ```
 

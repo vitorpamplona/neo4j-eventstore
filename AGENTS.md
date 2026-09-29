@@ -16,8 +16,12 @@ held, and the graph follows.
 ## Map
 
 - **`:engine`**, layered in this order:
-  - `schema/` and `derive/`: labels, relationship-type names, the kind registry and policy, then
-    event → nodes and edges;
+  - `schema/`: labels, node keys, policy;
+  - `vocab/`: the link vocabulary — every relation (the relationship types), its typed props,
+    `LinkBuilder` (`docs/vocabulary.md`);
+  - `kinds/`: one mapper per Quartz event class (`<Package>Links.kt`), small local tag parsers
+    where Quartz has none (`<Package>Tags.kt`), and `KindLinks`, an event's links;
+  - `derive/`: links → nodes and edges, plus the storage rules (nsec, key bounds, the slot);
   - the port, `GraphIndex`;
   - `metrics/`;
   - its two implementations: `memory/` (`InMemoryGraphIndex`, the **executable spec**) and
@@ -31,6 +35,8 @@ held, and the graph follows.
 
 `ModuleBoundariesTest` holds the layers, `PortDecoratorsTest` checks that a decorator overrides
 every port member, and `NoEmbeddedNeo4jTest` checks that no module links the GPL server.
+`KindMappersCoverageTest` fails for any Quartz event class without a mapper, and
+`MapperCodeReadsTagParsersTest` for raw tag-slot reads in mapper code.
 
 ## Traps
 
@@ -45,7 +51,15 @@ every port member, and `NoEmbeddedNeo4jTest` checks that no module links the GPL
   Without that, a stale slot whose winner sits in another window is never repaired.
 - **Change `InMemoryGraphIndex` and `Neo4jGraphIndex` together.** `ProjectionIT` asserts that
   their dumps are equal.
-- **Relationship type names are API** (`docs/schema.md`). A rename is a major schema version.
+- **Relationship type names are API** (`docs/schema.md`). They are the vocabulary's relation
+  names; a rename or re-split is a major schema version.
+- **A mapper states meaning, never guesses it.** No fallback by tag letter or value shape: a
+  64-hex `e` in a chess start event is a board hash. Read tags through Quartz's Tag parsers; where
+  Quartz has none, add a small parser to `kinds/<Package>Tags.kt` (named with the package prefix:
+  every mapper shares the `kinds` package). A Quartz bump that adds a class fails the coverage
+  test until its mapper lands.
+- **Golden tests are the vocabulary's record** (`kinds/<Package>LinksTest`). Change an
+  expectation only with the decision behind it in `docs/vocabulary.md`.
 - **The Cypher guard walks the `EXPLAIN` plan.** Do not add a text-level check that the plan
   walk makes redundant. Any new allowlisted procedure must be read-only and must not reveal
   other databases.

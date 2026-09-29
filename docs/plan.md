@@ -114,6 +114,8 @@ This copies vespa-eventstore's shape.
 
 ## P2 — Derivation (`:engine` `schema/` + `derive/`) [N]
 
+*Schema 1.x, superseded by [S2](#s2--schema-20-the-link-vocabulary-n); kept as the record of what shipped first.*
+
 This phase is pure Kotlin. It is the heart of the schema.
 
 - `schema/`:
@@ -280,6 +282,23 @@ Staging is read-only: it is a data source, never a test gate.
 
 ---
 
+## S2 — Schema 2.0: the link vocabulary [N]
+
+Supersedes P2's derivation (the `<tag>_<kind>` types, the hint providers, `KindRegistry`,
+`RoleTable`, `LinkRules`). Design and decisions: [`vocabulary.md`](vocabulary.md).
+
+- `vocab/`: the 172 relations (`Relation<P>`), their typed props, `LinkBuilder`, `PropsColumns`.
+- `kinds/`: one mapper per Quartz event class (418 at pin `6d9982c602`), ported from amethyst
+  #4269 with its golden tests; local parsers where Quartz has none.
+- `derive/`: links → edges (type = relation name), the nsec rule, the `:Tag` bound, the slot as
+  the event's own `ADDRESS` for replaceable and addressable kinds alike.
+- **Tests:** a golden test file per Quartz package, `KindMappersCoverageTest` (every Quartz class
+  has a mapper), `MapperCodeReadsTagParsersTest`, `PropsColumnsTest`, the ported invariants and
+  regressions, and the reference queries in the new vocabulary.
+
+**Exit:** all of the above green, plus the integration gate. No migration: nothing ran 1.x in
+production, so a 2.0 graph is built fresh.
+
 ## R — vespa-relay integration and production load [R]
 
 | Step | Work |
@@ -317,12 +336,12 @@ drift for a week.
 |---|---|---|
 | vespa-eventstore declines or delays the observer hook | Low–Medium | The fallback in spec §6.4 (relay-side accepted-event feed plus local NIP-09/62) keeps the project unblocked. The reconciler bounds the extra drift. |
 | The initial load of 500M events takes too long or runs out of disk | Medium | Offline bulk import. P7 measures bytes per event and per kind. The id encoding (Q6). |
-| The page cache cannot hold the hot set, so queries are disk-bound | High at the full scale on modest hardware | A dedicated host sized from P7. Kind-typed relationships keep expansions narrow even when cold. |
+| The page cache cannot hold the hot set, so queries are disk-bound | High at the full scale on modest hardware | A dedicated host sized from P7. Relations split per meaning (`FOLLOW` vs `SUBSCRIBED`, `REPORTED_USER` vs `REPORTED_AUTHOR`) keep expansions narrow even when cold. |
 | Hub-node write contention (popular pubkeys) | Medium | Sorted-key batches and driver retries, measured in P4 and P7. |
 | **Heavy Cypher starves the projector (accepted in v1: no limits)** | Medium | The audience starts at `admin`. The reconciler repairs drift after the load passes. Limits arrive in P8 from measurements. |
 | Raw Cypher used to write, read files or reach internal URLs (Community has no RBAC) | High without guards | The layered `CypherGuard` plus server settings, with `CypherGuardIT` as a CI gate. |
 | Bulk DM-metadata mining (kinds 4 and 1059 are projected, so senders and recipients are queryable) | Medium | The Cypher audience starts at `admin` (Q4). The kind exclude list is available if that ever needs to change (spec §8.4). |
 | A private-key leak via `nsec` in content | Certain without the rule | The deriver's exclusion, an invariant test, and the upstream Quartz fix. |
 | The public schema changes and breaks users' queries | Medium | `docs/schema.md`, `GET /graph/schema`, semantic versioning, and migration notes. |
-| A Quartz pin bump changes provider output | Medium | Appendix-driven golden tests turn red. `KindRegistryMigration`. |
+| A Quartz pin bump changes a parser the mappers read, or adds a kind | Medium | The mapper golden tests turn red; `KindMappersCoverageTest` fails on an unmapped class. |
 | GPL contamination | Low | Driver-only dependency, plus `NoEmbeddedNeo4jTest`. |
