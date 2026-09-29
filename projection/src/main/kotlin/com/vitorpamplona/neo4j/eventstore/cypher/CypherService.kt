@@ -68,6 +68,23 @@ class CypherService(
     }
 
     /**
+     * Only the guard's verdict — for an HTTP layer that must choose its status code BEFORE it
+     * starts streaming a 200 (a streamed body cannot turn into a 400 halfway). Null = allowed.
+     */
+    suspend fun precheck(request: CypherRequest): Outcome.Rejected? =
+        withContext(Dispatchers.IO) {
+            val config =
+                SessionConfig
+                    .builder()
+                    .withDatabase(database)
+                    .withDefaultAccessMode(AccessMode.READ)
+                    .build()
+            driver.session(config).use { session ->
+                (guard.check(session, request.query, request.params) as? CypherGuard.Verdict.Rejected)?.let { Outcome.Rejected(it.reason) }
+            }
+        }
+
+    /**
      * Executes [request] and writes the JSON document `{"columns":[…],"rows":[[…],…],"elapsedMs":n}`
      * to [sink] in pieces (rows are never all held at once). On rejection nothing is written.
      */
