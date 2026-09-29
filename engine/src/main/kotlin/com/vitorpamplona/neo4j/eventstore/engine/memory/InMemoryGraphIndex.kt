@@ -245,7 +245,9 @@ class InMemoryGraphIndex(
     companion object {
         const val DEFAULT_FENCE_SECONDS = 3_600L
 
-        val EDGE_ORDER = compareBy<EdgeView>({ it.type }, { it.targetLabel }, { it.targetKey })
+        // Props last: one target reached two ways is two edges that differ only there (a user
+        // tagged in `p` and linked in the content is two MENTIONs, `via` p and `via` content).
+        val EDGE_ORDER = compareBy<EdgeView>({ it.type }, { it.targetLabel }, { it.targetKey }, { it.props.toSortedMap().toString() })
 
         /** An event node's normalized properties (shared with the Neo4j binding's dump). */
         fun eventProps(doc: GraphDoc): Map<String, Any> =
