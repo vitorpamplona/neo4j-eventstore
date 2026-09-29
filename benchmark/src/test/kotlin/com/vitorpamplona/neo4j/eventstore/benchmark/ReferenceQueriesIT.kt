@@ -39,6 +39,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
 import org.junit.jupiter.api.Tag
+import org.neo4j.driver.summary.Plan
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -87,6 +88,11 @@ class ReferenceQueriesIT {
             ev(7, f2, listOf(listOf("e", n2.id), listOf("p", y)), "+"),
             ev(30382, service, listOf(listOf("d", x), listOf("rank", "91"))),
             ev(30382, service, listOf(listOf("d", y), listOf("rank", "40"))),
+            // Reports: a standing one about x, one about x's NOTE with an invented type, and a
+            // localized label about y.
+            ev(1984, f1, listOf(listOf("p", x, "impersonation"))),
+            ev(1984, f2, listOf(listOf("e", n1.id, "swearing"), listOf("p", x))),
+            ev(1984, me, listOf(listOf("p", y, "Spam \uD83D\uDCE3"))),
         )
 
     private suspend fun rows(
@@ -187,6 +193,56 @@ class ReferenceQueriesIT {
                     mapOf("ids" to listOf(n1.id, n2.id)),
                 )
             assertEquals(listOf(n2.id to 1L), hybrid.map { it.jsonArray[0].jsonPrimitive.content to it.jsonArray[1].jsonPrimitive.long })
+
+            // T12 — user-wide reports of x (not reports of x's notes), by type.
+            val t12 =
+                rows(
+                    cypher,
+                    """
+                    MATCH (:User {pubkey: ${'$'}x})<-[r:p_1984 {scope: 'user'}]-(:Stored)-[:by_1984]->(reporter:User)
+                    RETURN reporter.pubkey AS pk, r.report AS type
+                    """.trimIndent(),
+                    mapOf("x" to x),
+                )
+            assertEquals(
+                listOf(f1 to "impersonation"),
+                t12.map {
+                    it.jsonArray[0].jsonPrimitive.content to
+                        it.jsonArray[1].jsonPrimitive.content
+                },
+            )
+
+            // Reports that count, whatever they are about: the standard categories only, so the
+            // invented "swearing" (category `other`) drops out — and it is still findable by its text.
+            val serious =
+                rows(
+                    cypher,
+                    """
+                    MATCH (u:User)<-[r:p_1984]-(:Stored)
+                    WHERE r.report IN ['impersonation', 'spam', 'illegal', 'malware']
+                    RETURN u.pubkey AS pk, collect(r.report) AS types ORDER BY pk
+                    """.trimIndent(),
+                )
+            assertEquals(
+                setOf(x to listOf("impersonation"), y to listOf("spam")),
+                serious
+                    .map {
+                        it.jsonArray[0].jsonPrimitive.content to
+                            it.jsonArray[1].jsonArray.map { t ->
+                                t.jsonPrimitive.content
+                            }
+                    }.toSet(),
+            )
+            val swearing = rows(cypher, "MATCH ()-[r:e_1984 {report_raw: 'swearing'}]->(n:Stored) RETURN n.id AS id")
+            assertEquals(listOf(n1.id), swearing.map { it.jsonArray[0].jsonPrimitive.content })
+
+            // A report query not anchored on one user seeks the relationship index, not every edge.
+            fun operators(p: Plan): List<String> = listOf(p.operatorType()) + p.children().flatMap { operators(it) }
+            val plan =
+                driver.session().use { s ->
+                    operators(s.run("EXPLAIN MATCH ()-[r:p_1984 {scope: 'user', report: 'impersonation'}]->(u) RETURN u").consume().plan())
+                }
+            assertTrue(plan.any { "RelationshipIndexSeek" in it }, "$plan")
 
             // JSON has no NaN: a non-finite result must not break the streamed document.
             val nan = rows(cypher, "RETURN 0.0 / 0.0 AS x, 1.0 / 0.0 AS y")

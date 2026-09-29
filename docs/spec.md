@@ -297,12 +297,14 @@ entry built on a Quartz helper, and has its own golden test:
 | 7 | the reaction's `:Event` | `content` (≤ 32 bytes: `+`, `-`, an emoji or a `:shortcode:`) | `ReactionEvent.content` |
 | 9735 | the receipt's `:Event` | `msats` | `ZapReceiptEvent.amount()` |
 | 9734 / 9321 / 8333 / 9736 | the event | `msats` where the kind states an amount |  |
-| 1984 | `p_1984` / `e_1984` | `report` (the report type) | `ReportEvent.reportedAuthorsWithOwnType()` |
+| 1984 | `p_1984` / `e_1984` / `a_1984` | `report` (the category: Quartz's `ReportType` code, `other` for a type it does not know), `report_raw` (the type as written, lowercased, ≤ 64 bytes), and on `p_1984` `scope` (`user` when the report names no event, address or blob; else `address` / `event` / `blob`). Relationship indexes cover them (docs/schema.md, "Reports"). | `Reported{Author,Event,Address}Tag.parse`, `ReportType` |
 | 30382 | `d_30382` (→ `:User`) | `rank`, `followers` | `UserAssertionEvent.rank()` / `followerCount()` |
 | 30023, 30311, 34550 | the event | `title` (≤ 256 bytes) | the `title` tag |
 
-Adding an extractor is an additive schema change. Existing events gain the value on the next
-full reconcile pass, or by a targeted backfill.
+Adding an extractor is an additive schema change, but it reaches only events applied after it
+ships. The reconciler diffs id sets, so it never re-derives an event the graph already holds.
+Until a re-derive pass exists, a graph built before the change gets the value only by a rebuild
+(bulk re-import).
 
 ### 4.4 Kind and tag policy (`schema/GraphPolicy`)
 
@@ -834,7 +836,8 @@ RETURN n, count(DISTINCT r) AS reactors ORDER BY reactors DESC;
 - T7: badge awarded-and-worn;
 - T8: community approvals;
 - T10: most-cited missing events (stubs);
-- T12: reporters of X that I follow.
+- T12: reporters of X that I follow, user-wide reports only (`scope: 'user'`).
+- T13 / T14: reports by category (dropping invented types) and by the type as written.
 
 ---
 

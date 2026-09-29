@@ -127,4 +127,44 @@ class DerivationRegressionsTest {
         val doc = deriver.derive(event(30382, ALICE, listOf(listOf("d", BOB), listOf("d", CAROL), listOf("rank", "90"))))
         assertEquals(listOf(BOB), doc.edges.filter { it.type == "d_30382" }.map { it.target.key })
     }
+
+    @Test
+    fun aReportAboutAUserIsUserScopedAndOneAboutContentIsNot() {
+        val userWide = deriver.derive(event(1984, ALICE, listOf(listOf("p", BOB, "impersonation"))))
+        assertEquals("user", userWide.edges.single { it.type == "p_1984" }.props["scope"])
+
+        val note = deriver.derive(event(1984, ALICE, listOf(listOf("e", hex("note"), "spam"), listOf("p", BOB))))
+        assertEquals("event", note.edges.single { it.type == "p_1984" }.props["scope"])
+        assertEquals("spam", note.edges.single { it.type == "p_1984" }.props["report"], "the author inherits the report's type")
+
+        val article =
+            deriver.derive(
+                event(1984, ALICE, listOf(listOf("e", hex("v1"), "spam"), listOf("a", "30023:$BOB:post", "spam"), listOf("p", BOB))),
+            )
+        assertEquals("address", article.edges.single { it.type == "p_1984" }.props["scope"])
+
+        val blob = deriver.derive(event(1984, ALICE, listOf(listOf("x", "ab".repeat(32), "malware"), listOf("p", BOB))))
+        assertEquals("blob", blob.edges.single { it.type == "p_1984" }.props["scope"])
+    }
+
+    @Test
+    fun anInventedReportTypeKeepsItsTextBesideItsCategory() {
+        val doc = deriver.derive(event(1984, ALICE, listOf(listOf("e", hex("note"), "", " Swearing "), listOf("p", BOB))))
+        val e = doc.edges.single { it.type == "e_1984" }.props
+        assertEquals("other", e["report"])
+        assertEquals("swearing", e["report_raw"])
+        assertEquals(
+            "swearing",
+            doc.edges.single { it.type == "p_1984" }.props["report_raw"],
+            "the author edge carries the report's type text",
+        )
+
+        val localized = deriver.derive(event(1984, ALICE, listOf(listOf("p", BOB, "Spam \uD83D\uDCE3"))))
+        val p = localized.edges.single { it.type == "p_1984" }.props
+        assertEquals("spam", p["report"], "a localized label folds into its category")
+        assertEquals("spam \uD83D\uDCE3", p["report_raw"])
+
+        val untyped = deriver.derive(event(1984, ALICE, listOf(listOf("p", BOB))))
+        assertEquals(null, untyped.edges.single { it.type == "p_1984" }.props["report_raw"], "no text when none was written")
+    }
 }

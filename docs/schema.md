@@ -1,6 +1,6 @@
 # Graph schema reference
 
-**Schema version 1.0** (the live value is in `:Meta.schema_version` and `GET /graph/schema`).
+**Schema version 1.1** (the live value is in `:Meta.schema_version` and `GET /graph/schema`).
 
 This is the contract for anyone writing Cypher against the graph. Labels, relationship types,
 property names and role strings are API:
@@ -57,7 +57,9 @@ Every relationship starts at an `:Event:Stored`, except `OWNED_BY`.
 | `roles` | Only where the type leaves the role open (below) | e.g. `["root", "reply"]` |
 | `via` | `ref_…` | `content` (a `nostr:` link in the text), `embedded` (an event embedded in the content, e.g. a repost), `description` (the zap request inside a receipt), or the multi-letter tag that carried it (`zap`, `pinned`, `30382:rank`, …). One target reached two ways is two relationships, one per `via` (a 10040 naming one service for `30382:rank` and `30382:followers`). |
 | `kind` | `_other` types | The source kind |
-| `report` | `p_1984`, `e_1984`, `a_1984` | The NIP-56 report type, as Quartz reads it: one of `nudity`, `malware`, `profanity`, `illegal`, `spam`, `impersonation`, `other`. The tag's own type (slot 2, or slot 3 when slot 2 is a relay hint), else the report's event-level type. |
+| `report` | `p_1984`, `e_1984`, `a_1984` | The report's CATEGORY, as Quartz reads it: `spam`, `impersonation`, `illegal`, `malware`, `nudity`, `profanity`, `harassment`, `violence` or `other`. Localized labels fold in (`Spam 📣` is `spam`); a type Quartz does not know is `other`. |
+| `report_raw` | `p_1984`, `e_1984`, `a_1984` | The type AS WRITTEN, trimmed and lowercased, up to 64 bytes (`swearing`, `ai-generated`, `spam 📣`). Absent when the report wrote none. |
+| `scope` | `p_1984` | What the report is about: `user` (it names no event, address or blob, so it is a standing complaint about the person), or `event`, `address`, `blob` (it reports that content, and this `p` is its author). `address` wins when a report names a version and its address. |
 | `rank`, `followers` | `d_30382` | The NIP-85 assertion's scores for that user |
 
 ### Roles
@@ -119,6 +121,20 @@ Every relationship starts at an `:Event:Stored`, except `OWNED_BY`.
 
 Amounts above 21M BTC (2.1×10¹⁸ msats) are not stored, so `sum(z.msats)` over real zaps cannot
 overflow.
+
+### Reports (NIP-56), in one place
+
+A report reaches its subjects through `p_1984`, `e_1984` and `a_1984`. Three questions come up in
+nearly every report query, and each is a property of the edge, so it needs no second hop:
+- **About the person, or about their content?** `p_1984.scope`. A report of a note tags the note
+  (`e`) and its author (`p`). Only `scope: 'user'` is a complaint about the person themselves.
+- **Which category?** `report`, from a fixed vocabulary. Filter on it to keep the categories that
+  matter and drop the minor types clients invent, which all land in `other`.
+- **Which exact type?** `report_raw`, the text the client wrote.
+
+Relationship indexes cover `p_1984 (scope, report)`, `p_1984 (report_raw)`, `e_1984 (report)` and
+`a_1984 (report)`, so a report query that is not anchored on one user still seeks rather than
+scans.
 
 ### Internal labels
 
@@ -188,10 +204,19 @@ MATCH (:Tag {key: 't:bitcoin'})<-[:t_1]-(n:Stored)-[:t_1]->(o:Tag)
 WHERE n.created_at >= $since AND o.key <> 't:bitcoin'
 RETURN o.value, count(*) AS uses ORDER BY uses DESC LIMIT 20;
 
-// T12 — who reported X, among the people I follow
-MATCH (:User {pubkey: $x})<-[r:p_1984]-(:Stored)-[:by_1984]->(reporter:User)
+// T12 — who reported X as a PERSON (not one of X's notes), among the people I follow
+MATCH (:User {pubkey: $x})<-[r:p_1984 {scope: 'user'}]-(:Stored)-[:by_1984]->(reporter:User)
 WHERE EXISTS { (:User {pubkey: $me})<-[:by_3]-(:Event)-[:p_3]->(reporter) }
 RETURN reporter, r.report;
+
+// T13 — users with reports that count: the standard categories only, so types clients
+// invented for minor things (`swearing` is category `other`) drop out
+MATCH (u:User)<-[r:p_1984]-(rep:Stored)
+WHERE r.report IN ['impersonation', 'spam', 'illegal', 'malware'] AND rep.created_at >= $since
+RETURN u, r.scope AS scope, count(*) AS reports ORDER BY reports DESC LIMIT 50;
+
+// T14 — one invented type, by its text
+MATCH (:Stored)-[r:e_1984 {report_raw: 'swearing'}]->(n:Stored) RETURN n;
 
 // Hybrid — full-text search in Vespa first (a NIP-50 REQ), then the graph
 UNWIND $ids AS id

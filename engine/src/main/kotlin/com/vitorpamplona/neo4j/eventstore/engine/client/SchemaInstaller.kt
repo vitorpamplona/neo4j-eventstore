@@ -70,7 +70,7 @@ class SchemaInstaller(
         const val DEFAULT_DATABASE = "neo4j"
 
         /** The public schema version (spec §8.6): minor for additive changes, major for renames/removals. */
-        const val SCHEMA_VERSION = "1.0"
+        const val SCHEMA_VERSION = "1.1"
 
         val STATEMENTS =
             listOf(
@@ -85,6 +85,13 @@ class SchemaInstaller(
                 "CREATE INDEX stored_expires_at IF NOT EXISTS FOR (n:${Labels.STORED}) ON (n.expires_at)",
                 "CREATE INDEX user_nip05 IF NOT EXISTS FOR (n:${Labels.USER}) ON (n.nip05)",
                 "CREATE INDEX removed_at IF NOT EXISTS FOR (n:${Labels.REMOVED}) ON (n.at)",
+                // Report queries filter the report edges themselves ("user-wide impersonation
+                // reports", "everything but the invented types"): relationship indexes let a
+                // query that is not anchored on one user seek instead of scanning every report.
+                "CREATE INDEX report_p_scope_type IF NOT EXISTS FOR ()-[r:p_1984]-() ON (r.scope, r.report)",
+                "CREATE INDEX report_p_raw IF NOT EXISTS FOR ()-[r:p_1984]-() ON (r.report_raw)",
+                "CREATE INDEX report_e_type IF NOT EXISTS FOR ()-[r:e_1984]-() ON (r.report)",
+                "CREATE INDEX report_a_type IF NOT EXISTS FOR ()-[r:a_1984]-() ON (r.report)",
             )
     }
 }

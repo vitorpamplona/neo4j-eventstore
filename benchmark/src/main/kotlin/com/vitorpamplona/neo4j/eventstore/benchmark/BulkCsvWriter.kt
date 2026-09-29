@@ -142,7 +142,10 @@ class BulkCsvWriter(
                 }
             val space = edge.target.kind.label
             require(RelTypes.isSafe(edge.type))
-            out(file, ":START_ID(Event),:END_ID($space),:TYPE,roles:string[],via,kind:long,report,rank:long,followers:long").apply {
+            out(
+                file,
+                ":START_ID(Event),:END_ID($space),:TYPE,roles:string[],via,kind:long,report,report_raw,scope,rank:long,followers:long",
+            ).apply {
                 val p = edge.props
 
                 @Suppress("UNCHECKED_CAST")
@@ -156,6 +159,8 @@ class BulkCsvWriter(
                         q(p["via"] as String?),
                         n(p["kind"]),
                         q(p[Extractors.REPORT] as String?),
+                        q(p[Extractors.REPORT_RAW] as String?),
+                        q(p[Extractors.SCOPE] as String?),
                         n(p[Extractors.RANK]),
                         n(p[Extractors.FOLLOWERS]),
                     ).joinToString(","),

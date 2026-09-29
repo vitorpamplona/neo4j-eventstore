@@ -62,6 +62,7 @@ class EdgeDeriver(
 
         // Step 1 — what Quartz says this kind links, validated to canonical keys.
         val secrets = LinkRules.contentSecrets(event.content)
+        val report = if (kind == 1984) Extractors.ReportFacts.of(event) else null
         // Rule 4 reads the FIRST `d` only, as Quartz's aboutUser() does; a second `d` asserts nothing.
         val firstD = tags.indexOfFirst { it.size >= 2 && it[0] == "d" }
         val linkedEvents = providerSet { (event as? EventHintProvider)?.linkedEventIds() }.filterCanonicalHex() - event.id
@@ -105,7 +106,7 @@ class EdgeDeriver(
                 val props = HashMap<String, Any>()
                 RoleTable.storedRoles(roles, index, tag)?.let { props[ROLES] = it }
                 if (bucketed) props[KIND] = kind.toLong()
-                Extractors.edgeValues(event, name, tag, target, policy)?.let { props.putAll(it) }
+                Extractors.edgeValues(event, name, tag, target, policy, report)?.let { props.putAll(it) }
                 out.add(EdgeDoc(type, target, props))
             } else if (policy.isTagNode(name, value)) {
                 out.add(EdgeDoc(type, NodeRef(NodeKind.TAG, "$name:$value"), if (bucketed) mapOf(KIND to kind.toLong()) else emptyMap()))
