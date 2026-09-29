@@ -2,7 +2,7 @@
 
 Source: Quartz `quartz/src/commonMain/kotlin/com/vitorpamplona/quartz/` at amethyst `main`
 (2026-09-29). **Re-run this catalogue on every Quartz pin bump.** Each row is one golden test in
-`:engine` `doc/` (spec §5, plan Phase 2). A row that changes upstream turns its test red. Paths are
+`:engine` `derive/` (spec §5, plan P2). A row that changes upstream turns its test red. Paths are
 relative to the package root above.
 
 The interfaces (`nip01Core/hints/HintProviders.kt`) return **ids only**. They carry no tag name
@@ -14,7 +14,7 @@ interface AddressHintProvider { fun addressHints(): List<AddressHint>; fun linke
 interface PubKeyHintProvider  { fun pubKeyHints(): List<PubKeyHint>;  fun linkedPubKeys(): List<HexKey> }
 ```
 
-The spec (§5.2) recovers the tag, the marker and the position by matching each linked id back
+The spec (§5.2) recovers the tag (and, for NIP-10, the marker) by matching each linked id back
 to the event's tags. It recovers roles from the kind-specific helpers (§5.3).
 
 ## Upstream gaps the store must shield itself from
