@@ -146,15 +146,14 @@ fixture (it reflects over `EventFactory`'s known kinds).
 
 ## P3 — The executable spec (`:engine` `memory/`) and the traversal model [N]
 
-- `GraphIndex` port (§3), `Traversal` model (§7.1), `TraversalResult` (with `truncated` and the
-  step that bit).
+- `GraphIndex` port (§3), `Traversal` model (§7.1), `TraversalResult`.
 - `InMemoryGraphIndex`:
   - `EventIndex` members delegate matching to vespa-eventstore's `InMemoryEventIndex`, a single
     NIP-01 spec;
   - on `put`/`remove`, it maintains an adjacency map from `EdgeDeriver`, with the stub
     semantics of §4.1;
-  - `GraphIndex.traverse` is the **reference semantics**: set per step, fanout newest-first,
-    frontier cap, `PATHS` weights, `Ref` sets, `exclude`, `stored` filtering.
+  - `GraphIndex.traverse` is the **reference semantics**: set per step, `PATHS` weights, `Ref`
+    sets, `exclude`, `stored` filtering. It has no caps (spec §7.1).
 - **Corpus.** Extend a copy of vespa-eventstore's deterministic `NostrCorpus`, generating the
   kinds the battery needs:
   - 1 with NIP-10 threads, 1111 comments, 7, 6/16, 9734/9735 with an embedded request, 3,
@@ -204,31 +203,26 @@ self-skip without Docker, `api.version=1.41` as in vespa-eventstore):
 ## P5 — Traversals on Neo4j (`query/TraversalCypher`, `:store` `GraphReads`) [N]
 
 - `TraversalCypher` (§7.3):
-  - a `CALL (n) {… LIMIT fanout}` subquery per step, then `DISTINCT` + frontier cap;
+  - a `CALL (n) {…}` subquery per step, then `DISTINCT`;
   - role → type expansion from `RoleTable` ∩ `relTypes()`;
   - `Ref` sets;
   - `PATHS` weights;
-  - the transaction timeout;
-  - truncation detection (fetch `cap + 1`).
-- `GraphLimits`, and typed rejections for over-limit requests.
+  - no limits of any kind (spec §7.1).
 - `:store` `mapping/TraversalJson`: the codec for §7.2, rejecting unknown keys. `GraphReads`
   covers `traverse`, `degree`, `edgesOf`, and `explain(traversal)` (the compiled Cypher +
   `EXPLAIN` plan, for operators).
 - **`TraversalParityIT`**: T1–T12, plus a randomized traversal generator (seeded), in-memory vs
-  Neo4j. Result sets, `PATHS` order and truncation flags must be identical.
+  Neo4j. Result sets and `PATHS` order must be identical.
 
 **Cypher endpoint mechanism** (spec §8.2), in `:store` `cypher/`:
 
 - `CypherGuard`: `EXPLAIN` pre-flight, `queryType` check, plan-operator walk (`LoadCSV`,
   non-allowlisted procedures and functions, `Show*` / `Terminate*`), then execution in a read
   transaction.
-- `CypherLimits` tiers (`admin`, `auth`, `public`): timeout, row cap (enforced by pulling, not
-  by rewriting the query), byte cap, concurrency semaphore, per-caller in-flight limit.
 - `CypherResultEncoder` (§8.2.3), with hydration under `SKELETON`.
 - `SchemaInstaller.assertSafeServer()`: refuses to open when the procedure allowlist, the
-  CSV-import setting or the memory caps are missing.
-- **`CypherGuardIT`**, the hostile battery of §8.2.5, run concurrently with a mirror-ingest load
-  and asserting the database is unchanged.
+  CSV-import setting is missing, or a plugin is installed.
+- **`CypherGuardIT`**, the hostile battery of §8.2.5, asserting the database is unchanged.
 - `docs/schema.md` (the public schema reference, with T1–T12 in Cypher) and `GraphReads.schema()`
   for `GET /graph/schema`.
 
@@ -285,13 +279,17 @@ Staging is a data source and a sanity oracle, never a test gate. It is read-only
 4. **Measure:** store size per 1M events (graph vs bodies, `FULL` vs `SKELETON`),
    relationship-type count, and T1–T12 p50/p99 with a warm vs cold page cache. Also measure the
    hub worst cases (the most-followed account; the most-replied note).
+   **Also collect what the deferred limits need** (spec §7.1, §8.2.2): the distribution of
+   per-step fanout and intermediate set sizes on real hubs, the memory and run time of heavy
+   traversals and Cypher shapes, and how much a heavy query slows the mirror's writes. These
+   are the numbers limits will be set from.
 5. **Extrapolate to 212M** and decide:
    - Q2 (body mode);
    - Q3 (hosting / RAM / separate host / kind subset);
    - whether path A alone can backfill in acceptable time, or path B ships.
 
 **Exit:** a `benchmark/README.md` "Scale" section with the measurements and the three decisions
-recorded.
+recorded, plus the measurements the future limits will be based on.
 
 ---
 
@@ -310,8 +308,8 @@ Each step is a PR in vespa-relay. They follow that repo's conventions:
 | **R2** | **Config** (`:common`). `openGraphStore()` reads `GRAPH_MIRROR` (default off), `NEO4J_URL`, `NEO4J_USER`, `NEO4J_PASSWORD`, `NEO4J_DATABASE`, `GRAPH_BODIES`, `GRAPH_MIRROR_QUEUE`, `GRAPH_RECONCILE_RECENT_SECONDS` and `GRAPH_RECONCILE_FULL_SECONDS`. Document them in `docs/configuration.md` and `.env.example`. `relay =` must be the same `RELAY_URL` given to Vespa, for NIP-62 scope. Refuse to boot when `GRAPH_MIRROR=on` and Neo4j is unreachable after a bounded retry. |
 | **R3** | **Mirror wiring.** Wrap the `VespaEventStore` in `StoreMirror` in **both** `RelayMain` and `SyncMain`. Fix the three sites that downcast `as? VespaEventStore` (`liveGatesOf`, `RelayDiscovery`, `SyncEngine`) to take the Vespa store explicitly rather than by cast. With the mirror off, the wrapper is not installed at all, so the behaviour is byte-identical. |
 | **R4** | **Reconciler job.** `relay/…/maintenance/GraphReconcile.kt` runs in the relay process only, like `ExpirationSweeper`. It has a cursor file like `FtsReindex`, and runs the dirty → recent → full cadence. |
-| **R5** | **Compose.** Add a `neo4j` service: `neo4j:2026.09-community`, profile `graph`, loopback-only `7474`/`7687`, a `neo4j_data` volume, `NEO4J_AUTH` from env, page-cache and heap sized by P7, `mem_limit`, and a `cypher-shell 'RETURN 1'` healthcheck. Apply the §8.2.2 server hardening as env: `NEO4J_dbms_security_procedures_allowlist`, `NEO4J_dbms_security_allow__csv__import__from__file__urls=false`, `NEO4J_db_transaction_timeout`, `NEO4J_db_memory_transaction_max`, `NEO4J_db_memory_transaction_total_max`, and no plugins. The Neo4j browser (7474) is never published beyond loopback. `relay`/`sync` `depends_on` it only under the profile. Keep the existing memory-budget warning honest. |
-| **R6** | **API and health.** Add `POST /graph` (Traversal JSON, public, `GraphLimits`, per-IP rate limit reusing `SearchGate`-style accounting) and `GET /graph/explain/{eventId}` (edges of one event). Add **`POST /graph/cypher`** (`{query, params}`), gated by `GRAPH_CYPHER=off\|admin\|auth\|public` (default `off`). `admin` reuses `AdminGate` / `Nip98AdminGate` against `RELAY_ADMIN_PUBKEYS`; `auth` accepts any valid NIP-98 signature and rate-limits per pubkey. A `503` sheds load while the mirror lags. Every call is audited to `.audit/graph-cypher/`. Add `GET /graph/schema`. Add a `graph` block to `/stats.json` / pulse (§9 health surface) and a web status card. Traversal results hydrate from **Vespa** by id when `GRAPH_BODIES=skeleton`. |
+| **R5** | **Compose.** Add a `neo4j` service: `neo4j:2026.09-community`, profile `graph`, loopback-only `7474`/`7687`, a `neo4j_data` volume, `NEO4J_AUTH` from env, page-cache and heap sized by P7, `mem_limit`, and a `cypher-shell 'RETURN 1'` healthcheck. Apply the §8.2.2 server hardening as env: `NEO4J_dbms_security_procedures_allowlist`, `NEO4J_dbms_security_allow__csv__import__from__file__urls=false`, and no plugins. No timeout or memory-cap settings in v1. The Neo4j browser (7474) is never published beyond loopback. `relay`/`sync` `depends_on` it only under the profile. Keep the existing memory-budget warning honest. |
+| **R6** | **API and health.** Add `POST /graph` (Traversal JSON, no limits in v1) and `GET /graph/explain/{eventId}` (edges of one event). Add **`POST /graph/cypher`** (`{query, params}`), gated by `GRAPH_CYPHER=off\|admin\|auth\|public` (default `off`). `admin` reuses `AdminGate` / `Nip98AdminGate` against `RELAY_ADMIN_PUBKEYS`; `auth` accepts any valid NIP-98 signature. There are no rate limits or load shedding in v1. Every call is audited to `.audit/graph-cypher/`. Add `GET /graph/schema`. Add a `graph` block to `/stats.json` / pulse (§9 health surface) and a web status card. Traversal results hydrate from **Vespa** by id when `GRAPH_BODIES=skeleton`. |
 | **R7** | **`GraphMirrorIT`** (Vespa + Neo4j containers). Drive the relay's ingest with injected drops and a Neo4j pause, assert id-set equality after one reconcile, and assert that client `OK` latency is unaffected while Neo4j is paused. |
 | **R8** | **Docs:** `docs/decisions/graph-mirror.md` (D1/D2, why accepted events and not index deltas, why Vespa is the authority), a runbook in `docs/operations.md` (backfill, reset, "reconcile says N extra"), and a line in AGENTS.md's traps: "the graph mirror is a replica; never write to Neo4j directly". |
 | **R9** | **Rollout on staging.** (a) The mirror on with the API off (shadow). (b) Backfill via P7's chosen path. (c) A reconcile reporting 0 missing / 0 extra for 7 consecutive days while the queue never overflows. (d) The API on. (e) Announce the endpoint and add the traversal JSON to the NIP-11 doc's extension notes. |
@@ -347,9 +345,8 @@ has held 0-drift for a week.
 | Disk/RAM at 212M events exceeds the single box | High | `SKELETON` bodies, a separate host, or a kind subset, decided by P7 numbers, not guesses. |
 | The mirror silently stops (Neo4j down, queue overflowing) | Medium | Dirty-hour marking, reconciler cadence, and health gauges. A configured-but-not-draining mirror is a reported fault. |
 | Raw Cypher used to write, read files or reach internal URLs (Community has no RBAC) | High without the guard | The layered `CypherGuard` (plan walk + read transaction + server allowlists + no plugins) with the `CypherGuardIT` hostile battery as a CI gate. Audience starts at `admin`. |
-| Raw Cypher exhausting memory or CPU and starving the mirror | Medium | Server-side per-query and total transaction-memory caps below the writer's headroom, timeouts, a concurrency semaphore, and 503 load shedding on mirror lag. A separate analytics instance is the escape hatch if contention persists (P7 measures it). |
+| Raw Cypher or traversals exhausting memory or CPU and starving the mirror (**accepted in v1: no limits**) | Medium | Deliberately deferred. Mitigations until then: the audience starts at `admin` (Q7), and the reconciler repairs any drift once the load passes. P7 and early production supply the numbers for timeouts, memory caps, concurrency and fanout/frontier caps. A separate analytics instance is the escape hatch if contention persists. |
 | Bulk DM-metadata mining through Cypher | Medium | D3: the relay's mirror does not replicate kinds 4/1059/21059. |
-| Unbounded traversals as a DoS vector on a public endpoint | Medium | Server-side `GraphLimits`, the transaction timeout, typed rejections, and per-IP rate limits. |
 | Quartz pin bumps change provider output | Medium | Appendix-driven golden tests turn red. `KindRegistryMigration` retypes edges. Pin history comments, as in vespa-eventstore. |
 | Private-key leak via NIP-19 `nsec` in content | Certain without the rule | Store-side exclusion plus an invariant test (P2), and the upstream fix (P0). |
 | GPL contamination by accidentally embedding Neo4j | Low | Driver-only dependency. A build check fails if any `org.neo4j:neo4j*` server artifact enters the runtime classpath. |

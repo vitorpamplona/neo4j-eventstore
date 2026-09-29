@@ -8,7 +8,7 @@ wear a badge.
 
 It is designed to run beside [vespa-eventstore](https://github.com/NosFabrica/vespa-eventstore)
 inside [vespa-relay](https://github.com/NosFabrica/vespa-relay), holding the same events. Vespa
-serves REQ, COUNT and NIP-50 search. Neo4j serves multi-hop graph queries through a bounded
+serves REQ, COUNT and NIP-50 search. Neo4j serves multi-hop graph queries through a
 traversal language and a guarded, read-only Cypher endpoint. It does not index for full-text
 search.
 

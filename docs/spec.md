@@ -29,7 +29,7 @@ Neo4j answers the questions Vespa cannot: multi-hop joins.
    Quartz's `EventHintProvider`, `PubKeyHintProvider` and `AddressHintProvider` (the "hint
    providers"), completed by a literal-tag fallback so that no single-letter reference tag is
    lost on a kind Quartz does not type.
-3. **A bounded traversal query language** (`Traversal`). It is a typed Kotlin model with a JSON
+3. **A traversal query language** (`Traversal`). It is a typed Kotlin model with a JSON
    wire form, compiled to Cypher the way vespa-eventstore compiles `EventQuery` to YQL. An
    in-memory executable spec defines its semantics.
 3b. **A read-only Cypher endpoint** (§8.2). This covers everything the traversal language cannot
@@ -150,7 +150,7 @@ GraphReads  ◀──────────│   NostrSemanticsStore( Metered(
 
 ```kotlin
 interface GraphIndex : AutoCloseable {
-    /** Runs a bounded [Traversal]; see §7 for semantics. Never partial silently: truncation is reported. */
+    /** Runs a [Traversal]; see §7 for semantics. */
     suspend fun traverse(t: Traversal): TraversalResult
     /** O(1) degree for one relationship type/direction (dense-node counts), e.g. follower count = degree(User, "p_3", IN). */
     suspend fun degree(node: NodeRef, type: String, dir: Direction): Long
@@ -492,7 +492,7 @@ no reputation data, so nothing is gated and served == matched.
 ```kotlin
 data class Traversal(
     val start: Start,
-    val steps: List<Step>,          // 0..maxSteps (default 6)
+    val steps: List<Step>,
     val result: ResultSpec = ResultSpec(),
 )
 
@@ -506,7 +506,6 @@ sealed interface Start {
 
 sealed interface Step {
     val where: NodeFilter?          // applied to the node the step ARRIVES at
-    val fanout: Int?                // max neighbours taken PER source node (newest first); default limits.fanout
     /** Event → what it references. */
     data class Out(val tags: Set<String> = ANY, val roles: Set<String> = ANY, val derived: Boolean = true, ...) : Step
     /** Any node ← the events that reference it; `kinds` = kinds of the REFERENCING events. */
@@ -531,7 +530,7 @@ data class NodeFilter(                              // the NIP-01 subset that ma
 data class ResultSpec(
     val nodes: Returning = Returning.LAST,          // LAST | EVENTS | USERS | ADDRESSES | TAGS
     val order: Order = Order.RECENT,                // RECENT | PATHS (distinct paths reaching the node, desc) | NONE
-    val limit: Int = 500,
+    val limit: Int? = null,                         // the caller's own LIMIT; null = every result
     val count: Boolean = false,                     // COUNT-like: size of the (deduplicated) final set
     val hydrate: Boolean = true,                    // return full events (else ids / keys only)
 )
@@ -541,25 +540,15 @@ data class ResultSpec(
 
 1. Every step maps a *set* of nodes to a *set* of nodes. It is `DISTINCT` after every step,
    except that under `order = PATHS` the path multiplicity is kept as a weight.
-2. `fanout` is applied per source node, newest first by `created_at` (or `at` on the edge). Then
-   the frontier is capped at `limits.frontier`.
-3. When either cap bites, the result carries `truncated = true` and names the step. **A bounded
-   answer is never silently presented as complete.** This is the same principle as
-   vespa-eventstore's `complete` flag.
-4. Events must be `:Stored` unless `where.stored = false`. Stubs are reachable, which is how you
+2. Events must be `:Stored` unless `where.stored = false`. Stubs are reachable, which is how you
    ask "what do people keep replying to that we don't have?".
-5. `Out` / `In` with `roles` expand to the relationship types whose role table can produce that
+3. `Out` / `In` with `roles` expand to the relationship types whose role table can produce that
    role, then filter on `roles`. `tags` restricts by the literal tag letter. `derived = false`
    excludes `ref_…` edges.
-6. **Limits** are server-side, not client-chosen:
-   - `maxSteps` 6;
-   - `fanout` default 1,000, maximum 10,000;
-   - `frontier` 50,000;
-   - `limit` maximum 5,000;
-   - transaction timeout 5 s.
-
-   Exceeding a *requested* bound is a typed rejection (`blocked: traversal exceeds …`), not a
-   silent clamp. Hitting the frontier or fanout cap is `truncated`, not an error.
+4. **No server-side limits in v1.** There is no cap on steps, per-node fanout, intermediate set
+   size, result size or run time. Every answer is complete. Limits are added later, from
+   production measurements (plan P7). The model leaves room for them: a future cap would add a
+   `truncated` flag to `TraversalResult`, not change these semantics.
 
 ### 7.2 Wire form (JSON)
 
@@ -591,18 +580,17 @@ a typo is an error, not a silently wider query.
 
 ### 7.3 Compilation (`query/TraversalCypher`)
 
-Each step becomes a `CALL (n) { … LIMIT $fanout }` subquery, followed by
-`WITH DISTINCT … LIMIT $frontier`. Named sets become collected lists. `PATHS` ordering carries
+Each step becomes a `CALL (n) { … }` subquery, followed by `WITH DISTINCT …`. Named sets become collected lists. `PATHS` ordering carries
 a `count(*)` through the chain. The example above compiles to roughly this:
 
 ```cypher
 MATCH (me:User {pubkey: $me})
-CALL (me) { MATCH (me)<-[:by_3]-(l:Event:Stored) RETURN l ORDER BY l.created_at DESC LIMIT 1 }
-CALL (l)  { MATCH (l)-[:p_3]->(f:User) RETURN f LIMIT $fanout }
+CALL (me) { MATCH (me)<-[:by_3]-(l:Event:Stored) RETURN l }      // at most one: kind 3 is replaceable
+CALL (l)  { MATCH (l)-[:p_3]->(f:User) RETURN f }
 WITH collect(DISTINCT f) AS follows
 UNWIND follows AS f
 CALL (f)  { MATCH (f)<-[r:ref_p_9735|P_9735]-(z:Event:Stored) WHERE 'zapper' IN r.roles
-            RETURN z ORDER BY z.created_at DESC LIMIT $fanout }
+            RETURN z }
 CALL (z)  { MATCH (z)-[r]->(n:Event:Stored) WHERE type(r) IN $zapTypes AND 'zap' IN r.roles
               AND n.kind = 1 AND n.created_at >= $since
               AND EXISTS { (n)-[:by_1]->(a:User) WHERE a IN follows }
@@ -611,7 +599,7 @@ RETURN n, count(*) AS paths ORDER BY paths DESC, n.created_at DESC, n.id LIMIT 1
 ```
 
 `TraversalParityIT` runs every traversal in the battery on both `InMemoryGraphIndex` and Neo4j
-over the same corpus, and asserts identical result sets, order and truncation flags. This is the
+over the same corpus, and asserts identical result sets and order. This is the
 graph counterpart of `VespaParityIT`.
 
 ### 7.4 Reference battery
@@ -650,7 +638,6 @@ object Neo4jEventStore {
         installSchema: Boolean = true,              // constraints/indexes/:Meta + migrations, idempotent
         writers: WriterTopology = WriterTopology.SHARED_STRICT,
         bodies: BodyMode = BodyMode.FULL,           // FULL | SKELETON, see §10
-        limits: GraphLimits = GraphLimits.Default,
         kindRegistry: KindRegistry = KindRegistry.quartzKnownKinds(),
     ): Neo4jEventStore
 }
@@ -666,7 +653,7 @@ class Neo4jEventStore internal constructor(...) : IEventStore by store {
 The assembled stack is:
 
 - `NostrSemanticsStore(MeteredEventIndex(ledger, neo4j), relay, writers = …)`
-- `GraphReads(MeteredGraphIndex(ledger, neo4j), limits)`
+- `GraphReads(MeteredGraphIndex(ledger, neo4j))`
 
 `writers` defaults to `SHARED_STRICT` because in vespa-relay two processes (relay and sync) both
 write. This is the same reason vespa-relay sets `STORE_WRITERS`.
@@ -680,7 +667,7 @@ injection:
 
 ### 8.2 The Cypher endpoint
 
-The traversal language (§7) stays: it is cheap, bounded by construction, cacheable, and the
+The traversal language (§7) stays: it is compact, cacheable, and the
 only shape that can later ride the Nostr wire. Cypher is the second, more powerful surface.
 Examples of what it adds:
 
@@ -695,8 +682,7 @@ call it (plan R6).
 suspend fun cypher(
     query: String,
     params: Map<String, Any?> = emptyMap(),
-    tier: CypherTier,                     // selects the CypherLimits below
-): CypherResult                           // columns, rows, truncated, elapsedMs, rejected?(reason)
+): CypherResult                           // columns, rows, elapsedMs, rejected?(reason)
 ```
 
 #### 8.2.1 Why it needs its own guard, not just a read-only flag
@@ -729,24 +715,12 @@ tested against a hostile battery (§8.2.5), and no single layer is trusted alone
    `SchemaInstaller` at boot (it refuses to open if unsafe):
    - `dbms.security.procedures.allowlist` is the same short list;
    - no APOC / GDS plugins in the serving instance;
-   - `dbms.security.allow_csv_import_from_file_urls=false`, with no import directory;
-   - `db.transaction.timeout` is a server-side backstop for the client timeout;
-   - `db.memory.transaction.max` caps one query's heap;
-   - `db.memory.transaction.total.max` caps all queries together, *below* the heap the mirror's
-     writer needs. A runaway cartesian product fails with a memory error; it does not starve
-     ingest.
-4. **Bounded execution** (`CypherLimits`, per tier):
-   - a client transaction timeout;
-   - a row cap: the endpoint stops *pulling* after `maxRows` and cancels. It does not rewrite
-     the query with `LIMIT`, which changes semantics under `ORDER BY` / aggregation. The result
-     then says `truncated`.
-   - a response byte cap;
-   - a global concurrency semaphore, plus one in-flight query per caller;
-   - per-caller rate limits.
-5. **Load shedding for sync.** When the mirror lags (`graph.lagSeconds` above a threshold, §9),
-   the endpoint answers `503 graph busy` before touching Neo4j. Keeping the replica current
-   outranks ad-hoc queries.
-6. **Audit.** Every call is logged to the relay's audit directory: caller, a query hash, the
+   - `dbms.security.allow_csv_import_from_file_urls=false`, with no import directory.
+4. **Resource limits: none in v1.** There are no timeouts, row or byte caps, memory caps,
+   concurrency caps, rate limits or load shedding. A query runs to completion, and one heavy
+   query can slow the mirror's writes. Limits are added later, from production measurements
+   (plan P7). Access control (Q7) is the only thing that decides who can run a query.
+5. **Audit.** Every call is logged to the relay's audit directory: caller, a query hash, the
    parameter *names*, elapsed time, rows, and the outcome or rejection reason. Hashing the text
    plus logging on rejection is enough to reproduce abuse without storing every query verbatim.
 
@@ -755,7 +729,7 @@ string interpolation anywhere in the path.
 
 #### 8.2.3 Results
 
-Rows are streamed as JSON (`{"columns": [...], "rows": [[...]], "truncated": false, "elapsedMs": n}`).
+Rows are streamed as JSON (`{"columns": [...], "rows": [[...]], "elapsedMs": n}`).
 Graph values serialize by label:
 
 - an `:Event:Stored` node is the **NIP-01 event JSON**. Under `BodyMode.SKELETON` it is hydrated
@@ -811,12 +785,6 @@ test asserts the database is byte-for-byte unchanged afterwards (node/relationsh
   - a procedure absent from the allowlist;
   - `apoc.*` (absent).
 - Evasion attempts: comments, mixed case, unicode escapes, and a multi-statement payload.
-- Resource exhaustion:
-  - a cartesian product that exceeds `db.memory.transaction.max`;
-  - an unbounded variable-length path that hits the timeout;
-  - a row flood that hits the row and byte caps;
-  - N+1 concurrent calls that hit the semaphore;
-  - **all while the mirror keeps ingesting within its lag budget.**
 
 #### 8.2.6 The schema as a public contract
 
@@ -979,7 +947,7 @@ The testing model mirrors vespa-eventstore.
 | `./gradlew build` (unit) | Nothing: no Docker, no Neo4j | Deriver golden tests: one per appendix row, plus link rules, **including the nsec test**. Role table. `EventQuery`→Cypher and `Traversal`→Cypher compile snapshots. `NostrSemanticsStore` over `InMemoryGraphIndex`. `InMemoryGraphIndex` traversal semantics. Mirror/reconciler convergence under reordering, drops and crashes. `ModuleBoundariesTest`, `PortDecoratorsTest`. |
 | `spotlessCheck` | Nothing | ktlint plus the MIT header (`.spotless/copyright.kt`) |
 | `:benchmark:test -Pintegration` | Docker (testcontainers `neo4j:2026.09-community`, self-skips without Docker) | `Neo4jParityIT`: vespa-eventstore's `ParityCheck` battery vs Quartz SQLite. The harness is copied, because vespa's `:benchmark` is unpublished. `FilterMatrixIT` (NIP-01 part): `Filter.match` oracle. `TraversalParityIT`: T1–T12 in-memory vs Neo4j. `SchemaMigrationIT`: kind-registry migration. `StagingCorpusIT`: the captured staging export. |
-| `CypherGuardIT` (integration) | Docker | The hostile-query battery of §8.2.5: every case is rejected or fails without side effects, and the mirror keeps its lag budget meanwhile. `SchemaInstaller` refuses to open on an unsafe server config. |
+| `CypherGuardIT` (integration) | Docker | The hostile-query battery of §8.2.5: every case is rejected or fails without side effects. `SchemaInstaller` refuses to open on an unsafe server config. |
 | vespa-relay `GraphMirrorIT` | Docker (Vespa + Neo4j) | Feed through `StoreMirror` with injected drops. After one reconcile, the id sets are equal, and a kind-5 / vanish / supersession applied only live converges. |
 
 CI (`.github/workflows/build.yml`) runs three jobs, `lint`, `build` and `integration`, as in
@@ -994,7 +962,7 @@ vespa-eventstore.
 | Q1 | D1: reuse `NostrSemanticsStore` via the `EventIndex` port, or fork the policy? | **Reuse.** Sync correctness rides on identical rules. |
 | Q2 | Body mode in the relay deployment | **`SKELETON`** and hydrate from Vespa. `FULL` for standalone use and gates. |
 | Q3 | Hosting at 212M events: the same box, a separate host, or a kind subset? | A separate host with enough RAM for the page cache. Revisit after the Phase 7 measurement. |
-| Q4 | How clients reach traversals: HTTP JSON only, or also on the Nostr wire? | **v1: `POST /graph`** (JSON, public, bounded), `POST /graph/cypher` (§8.2) and `GET /graph/explain/{id}`. Nostr-wire exposure (a REQ extension, or a NIP-90 DVM) is a later, separate NIP-shaped decision. |
+| Q4 | How clients reach traversals: HTTP JSON only, or also on the Nostr wire? | **v1: `POST /graph`** (JSON), `POST /graph/cypher` (§8.2) and `GET /graph/explain/{id}`. Nostr-wire exposure (a REQ extension, or a NIP-90 DVM) is a later, separate NIP-shaped decision. |
 | Q5 | Maven group / package | `com.vitorpamplona.neo4j.eventstore`, or `com.nosfabrica.neo4j.eventstore` for symmetry with its sibling |
-| Q7 | Who may call `POST /graph/cypher`: admins, any NIP-98-authenticated pubkey, or anyone? And is DM metadata (kinds 4/1059/21059) excluded from the relay's graph (D3)? | **Start at `admin`** (NIP-98 against `RELAY_ADMIN_PUBKEYS`, the existing `AdminGate`). Widen to `auth` (any NIP-98 pubkey, per-pubkey limits) once `CypherGuardIT` and a week of admin use show the limits hold. `public` only with the tightest tier. **Exclude DM metadata: yes.** |
+| Q7 | Who may call `POST /graph/cypher`: admins, any NIP-98-authenticated pubkey, or anyone? And is DM metadata (kinds 4/1059/21059) excluded from the relay's graph (D3)? | **Start at `admin`** (NIP-98 against `RELAY_ADMIN_PUBKEYS`, the existing `AdminGate`). With no resource limits in v1 (§8.2.2), widen to `auth` (any NIP-98 pubkey) or `public` only after production-derived limits exist. **Exclude DM metadata: yes.** |
 | Q6 | Trust-aware traversals (observer lens, rank floor on reached users) | Later (plan Phase 8), by giving Neo4j a `ReputationIndex` so `TrustProjection` can decorate it too |
