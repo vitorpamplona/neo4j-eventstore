@@ -33,7 +33,7 @@ class RoleTableTest {
 
     /**
      * The stored `root` / `reply` roles agree with Quartz's own reading of a note's thread
-     * (TextNoteEvent.root() / reply()) over random mixes of marked, unmarked and odd-position
+     * (TextNoteEvent.root() / replyingTo(), the direct parent) over random mixes of marked, unmarked and odd-position
      * markers — so "a reply" in the graph means what it means in Amethyst.
      */
     @Test
@@ -63,15 +63,22 @@ class RoleTableTest {
                     .toSet()
 
             note.root()?.eventId?.let { assertTrue(it in withRole("root"), "round $round: Quartz root $it not stored as root; tags=$tags") }
-            note.reply()?.eventId?.let {
+            note.replyingTo()?.let {
                 assertTrue(
                     it in withRole("reply"),
-                    "round $round: Quartz reply $it not stored as reply; tags=$tags",
+                    "round $round: Quartz parent $it not stored as reply; tags=$tags",
                 )
             }
             // Every e edge carries at least one role.
             doc.edges.filter { it.type == "e_1" }.forEach { assertTrue((it.props["roles"] as List<*>).isNotEmpty()) }
         }
+    }
+
+    @Test
+    fun aDirectReplyToTheRootMarksTheRootAsItsParentToo() {
+        val root = hex("root")
+        val doc = deriver.derive(event(1, tags = listOf(listOf("e", root, "", "root"))))
+        assertEquals(listOf("root", "reply"), doc.edges.first { it.target.key == root }.props["roles"])
     }
 
     @Test

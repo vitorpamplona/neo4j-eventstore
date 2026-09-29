@@ -39,7 +39,11 @@ object Neo4jTestServer {
     private val container: Neo4jContainer<*>? by lazy {
         if (System.getProperty("itNeo4j") != null) return@lazy null
         val image = DockerImageName.parse(System.getProperty("neo4jImage") ?: "neo4j:2026.09-community").asCompatibleSubstituteFor("neo4j")
-        Neo4jContainer(image).withAdminPassword(PASSWORD).also { it.start() }
+        // Hardened as spec §8.2 layer 3 requires of any server the Cypher endpoint fronts.
+        Neo4jContainer(image)
+            .withAdminPassword(PASSWORD)
+            .withNeo4jConfig("dbms.security.allow_csv_import_from_file_urls", "false")
+            .also { it.start() }
     }
 
     fun dockerAvailable(): Boolean = runCatching { DockerClientFactory.instance().isDockerAvailable }.getOrDefault(false)

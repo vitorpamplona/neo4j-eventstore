@@ -61,13 +61,16 @@ object RoleTable {
         val eIndexes: List<Int> = tags.indices.filter { tags[it].size >= 2 && tags[it][0] == "e" }
         val lastA: Int = tags.indices.lastOrNull { tags[it].size >= 2 && tags[it][0] == "a" } ?: -1
 
-        // NIP-10 exactly as Quartz reads it (BaseThreadedEvent.root() / reply()): the marked root,
-        // else the first unmarked `e`; the LAST marked reply, else the last unmarked `e`.
-        val rootIndex: Int =
-            tags.indexOfFirst { MarkedETag.parseRoot(it) != null }.takeIf { it >= 0 }
-                ?: tags.indexOfFirst { MarkedETag.parseUnmarkedRoot(it) != null }
+        // NIP-10 exactly as Quartz reads it. ROOT = BaseThreadedEvent.root(): the marked root,
+        // else the first unmarked `e`. REPLY = the DIRECT PARENT, BaseThreadedEvent.replyingTo():
+        // the last marked reply, else the marked root (NIP-10: a direct reply to the root carries
+        // only a `root` marker), else the last unmarked `e` — so following `reply` edges walks a
+        // whole reply tree, direct replies to the root included.
+        private val markedRoot = tags.indexOfFirst { MarkedETag.parseRoot(it) != null }
+        val rootIndex: Int = markedRoot.takeIf { it >= 0 } ?: tags.indexOfFirst { MarkedETag.parseUnmarkedRoot(it) != null }
         val replyIndex: Int =
             tags.indexOfLast { MarkedETag.parseReply(it) != null }.takeIf { it >= 0 }
+                ?: markedRoot.takeIf { it >= 0 }
                 ?: tags.indexOfLast { MarkedETag.parseUnmarkedReply(it) != null }
     }
 

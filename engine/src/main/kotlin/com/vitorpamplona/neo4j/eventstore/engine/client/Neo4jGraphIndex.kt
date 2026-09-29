@@ -51,9 +51,9 @@ import org.neo4j.driver.Value
  * [GraphIndex] over a Neo4j server, reached through the Apache-2.0 driver only (the server is
  * GPLv3 and is never linked). `ProjectionIT` holds it to [InMemoryGraphIndex]'s [dump]s.
  *
- * Every event is applied in the batch's single managed write transaction, and the driver
- * retries the whole callback on a transient failure (a deadlock between the two writer
- * processes on a hub node, say) — so every step here is written to be safe to re-run.
+ * Every event (and every removal) is its own managed write transaction, and the driver retries
+ * the callback on a transient failure (a deadlock between the two writer processes on a hub
+ * node, say) — so every step here is written to be safe to re-run.
  *
  * CONCURRENCY. Two processes apply at once, so check-then-write must hold a lock: each apply
  * first WRITES to the nodes its decision depends on — the event node (duplicates, the fence) and
@@ -86,11 +86,14 @@ class Neo4jGraphIndex(
         return writeLock.withLock {
             withContext(Dispatchers.IO) {
                 driver.session(config()).use { session ->
-                    session.executeWrite { tx ->
-                        var outcome = ApplyOutcome(excluded = docs.count { it == null })
-                        for (doc in docs) if (doc != null) outcome += applyOne(tx, doc, authoritative)
-                        outcome
-                    }
+                    var outcome = ApplyOutcome(excluded = docs.count { it == null })
+                    // One transaction PER EVENT: observed on 2026.09, a statement that reads a node
+                    // an earlier statement in the same transaction deleted can fail with "Node …
+                    // has been deleted in this transaction" (intermittently) instead of skipping
+                    // it — and an apply may delete (a displaced incumbent's orphans) before the
+                    // next event reads. Batching is the bulk importer's job, not the live path's.
+                    for (doc in docs) if (doc != null) outcome += session.executeWrite { tx -> applyOne(tx, doc, authoritative) }
+                    outcome
                 }
             }
         }
@@ -127,7 +130,15 @@ class Neo4jGraphIndex(
                 cleanupSlotAnchor(tx, doc)
                 return ApplyOutcome(stale = 1)
             }
-            unapplyStored(tx, incumbent.first)
+            // Keep what the new version is about to reference (its author, its address, shared
+            // targets): deleting a node and re-MERGEing its key in one transaction is the
+            // read-after-delete pattern apply() avoids.
+            unapplyStored(
+                tx,
+                incumbent.first,
+                keep =
+                    doc.edges.mapTo(HashSet()) { it.target.kind to it.target.key } + (NodeKind.EVENT to doc.id),
+            )
         }
         write(tx, doc)
         tx.run("MATCH (r:${Labels.REMOVED} {id: \$id}) DELETE r", mapOf("id" to doc.id)).consume()
@@ -284,9 +295,10 @@ class Neo4jGraphIndex(
         writeLock.withLock {
             withContext(Dispatchers.IO) {
                 driver.session(config()).use { session ->
-                    session.executeWrite { tx ->
-                        val now = nowSecs()
-                        for (id in ids) {
+                    val now = nowSecs()
+                    // One transaction per id, for the reason apply() gives.
+                    for (id in ids) {
+                        session.executeWrite { tx ->
                             unapplyStored(tx, id)
                             tx.run("MERGE (r:${Labels.REMOVED} {id: \$id}) SET r.at = \$now", mapOf("id" to id, "now" to now)).consume()
                         }
@@ -300,6 +312,7 @@ class Neo4jGraphIndex(
     private fun unapplyStored(
         tx: TransactionContext,
         id: String,
+        keep: Set<Pair<NodeKind, String>> = emptySet(),
     ) {
         // Lock, and learn what the event owned: its kind (kind 0 owns its author's names).
         val kind =
@@ -345,13 +358,14 @@ class Neo4jGraphIndex(
         // runs after every edge that could have kept it alive is gone.
         val users = HashSet<String>()
         for ((k, key) in targets) {
+            if ((k to key) in keep) continue
             when (k) {
                 NodeKind.USER -> users += key
                 NodeKind.ADDRESS -> dropAddressIfOrphan(tx, key)?.let { users += it }
                 else -> dropIfOrphan(tx, k, key)
             }
         }
-        users.forEach { dropIfOrphan(tx, NodeKind.USER, it) }
+        users.forEach { if ((NodeKind.USER to it) !in keep) dropIfOrphan(tx, NodeKind.USER, it) }
     }
 
     private fun dropIfOrphan(
