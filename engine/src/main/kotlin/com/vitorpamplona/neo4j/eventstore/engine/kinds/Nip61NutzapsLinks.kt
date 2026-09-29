@@ -20,6 +20,26 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.ZapProps
+import com.vitorpamplona.quartz.nip01Core.tags.events.ETag
+import com.vitorpamplona.quartz.nip01Core.tags.kinds.KindTag
+import com.vitorpamplona.quartz.nip01Core.tags.people.PTag
+import com.vitorpamplona.quartz.nip61Nutzaps.info.NutzapInfoEvent
+import com.vitorpamplona.quartz.nip61Nutzaps.nutzap.NutzapEvent
+
 /** Quartz's `nip61Nutzaps` classes. */
 internal fun KindMappers.Builder.nip61Nutzaps() {
+    // NIP-61: `e` is the nutzapped event and `p` the recipient; the sender is the author. The amount
+    // is what the proofs claim (it is only checked against the mint at redeem time), and only a
+    // sat-denominated nutzap can say it in msats.
+    on<NutzapEvent> { e ->
+        val props = ZapProps(e.nip61ClaimedMsats())
+        each(e.tags, ETag::parse) { event(Relation.ZAPPED, it, ETag.TAG_NAME, props) }
+        each(e.tags, PTag::parse) { user(Relation.ZAP_RECIPIENT, it, PTag.TAG_NAME, props) }
+        each(e.tags, KindTag::parse) { tag(Relation.TAG, KindTag.TAG_NAME, it.toString()) }
+    }
+
+    free<NutzapInfoEvent>()
 }

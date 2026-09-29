@@ -20,6 +20,28 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.RoleProps
+import com.vitorpamplona.quartz.nip51Lists.muteList.tags.UserTag
+import com.vitorpamplona.quartz.nipF4Podcasts.authored.AuthoredPodcastsEvent
+import com.vitorpamplona.quartz.nipF4Podcasts.episode.PodcastEpisodeEvent
+import com.vitorpamplona.quartz.nipF4Podcasts.favorites.FavoritePodcastsListEvent
+import com.vitorpamplona.quartz.nipF4Podcasts.metadata.PodcastMetadataEvent
+import com.vitorpamplona.quartz.nipF4Podcasts.metadata.tags.AuthorTag
+
 /** Quartz's `nipF4Podcasts` classes. */
 internal fun KindMappers.Builder.nipF4Podcasts() {
+    // NIP-F4: the podcasts this user authors, the counter-claim a podcast's 10154 authors are verified against.
+    on<AuthoredPodcastsEvent> { e -> each(e.tags, UserTag::parseKey) { user(Relation.AUTHORED, it, UserTag.TAG_NAME) } }
+
+    // The public favorites; the encrypted ones stay private.
+    on<FavoritePodcastsListEvent> { e -> each(e.tags, UserTag::parseKey) { user(Relation.FAVORITE, it, UserTag.TAG_NAME) } }
+
+    // NIP-F4: the people the podcast (the signer) claims as its authors, with their role. The claim holds only when their 10064 names the podcast back.
+    on<PodcastMetadataEvent> { e ->
+        e.claimedAuthors().forEach { user(Relation.PODCAST_AUTHOR, it.pubKey, AuthorTag.TAG_NAME, RoleProps(listOfNotNull(it.role))) }
+    }
+
+    free<PodcastEpisodeEvent>()
 }

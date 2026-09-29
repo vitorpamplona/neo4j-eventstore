@@ -20,6 +20,25 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.ZapProps
+import com.vitorpamplona.quartz.nip01Core.tags.aTag.ATag
+import com.vitorpamplona.quartz.nip01Core.tags.events.ETag
+import com.vitorpamplona.quartz.nip01Core.tags.kinds.KindTag
+import com.vitorpamplona.quartz.nip01Core.tags.people.PTag
+import com.vitorpamplona.quartz.nipBCOnchainZaps.zap.OnchainZapEvent
+import com.vitorpamplona.quartz.nipBCOnchainZaps.zap.tags.BitcoinTxIdTag
+
 /** Quartz's `nipBCOnchainZaps` classes. */
 internal fun KindMappers.Builder.nipBCOnchainZaps() {
+    // NIP-BC: the recipient and the zapped content; the sender is the author. The amount is the sender's claim until it is checked on chain, and `i` names the transaction.
+    on<OnchainZapEvent> { e ->
+        val props = ZapProps(e.claimedAmountInSats()?.let { it * 1000 })
+        each(e.tags, PTag::parse) { user(Relation.ZAP_RECIPIENT, it, PTag.TAG_NAME, props) }
+        each(e.tags, ETag::parse) { event(Relation.ZAPPED, it, ETag.TAG_NAME, props) }
+        each(e.tags, ATag::parse) { address(Relation.ZAPPED, it, ATag.TAG_NAME, props) }
+        each(e.tags, BitcoinTxIdTag::parseScope) { tag(Relation.TAG, BitcoinTxIdTag.TAG_NAME, it) }
+        each(e.tags, KindTag::parse) { tag(Relation.TAG, KindTag.TAG_NAME, it.toString()) }
+    }
 }

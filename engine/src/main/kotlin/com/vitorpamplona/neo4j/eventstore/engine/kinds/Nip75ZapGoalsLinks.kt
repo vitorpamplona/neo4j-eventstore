@@ -20,6 +20,24 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
+import com.vitorpamplona.quartz.nip01Core.tags.aTag.ATag
+import com.vitorpamplona.quartz.nip01Core.tags.events.ETag
+import com.vitorpamplona.quartz.nip01Core.tags.people.PTag
+import com.vitorpamplona.quartz.nip01Core.tags.references.ReferenceTag
+import com.vitorpamplona.quartz.nip75ZapGoals.ZapGoalEvent
+
 /** Quartz's `nip75ZapGoals` classes. */
 internal fun KindMappers.Builder.nip75ZapGoals() {
+    // NIP-75: the event a goal raises funds for (Quartz writes both an `a` and an `e` for an
+    // addressable one) and a web page (`r`). NIP-75 defines no `p`; one here is a mention. The
+    // beneficiaries' `zap` tags are emitted for every kind by [everyKindLinks].
+    on<ZapGoalEvent> { e ->
+        each(e.tags, ETag::parse) { event(Relation.FUNDED, it, ETag.TAG_NAME) }
+        each(e.tags, ATag::parse) { address(Relation.FUNDED, it, ATag.TAG_NAME) }
+        each(e.tags, PTag::parse) { user(Relation.MENTION, it, PTag.TAG_NAME) }
+        each(e.tags, ReferenceTag::parse) { tag(Relation.TAG, ReferenceTag.TAG_NAME, it) }
+        hashtags(e.tags)
+    }
 }

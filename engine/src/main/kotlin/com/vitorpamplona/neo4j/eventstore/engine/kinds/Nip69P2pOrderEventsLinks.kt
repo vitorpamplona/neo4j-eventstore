@@ -20,6 +20,9 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.quartz.nip69P2pOrderEvents.P2POrderEvent
+
 /** Quartz's `nip69P2pOrderEvents` classes. */
 internal fun KindMappers.Builder.nip69P2pOrderEvents() {
+    free<P2POrderEvent>()
 }

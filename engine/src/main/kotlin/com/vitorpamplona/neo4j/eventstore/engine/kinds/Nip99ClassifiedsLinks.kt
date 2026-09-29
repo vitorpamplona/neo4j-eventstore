@@ -20,6 +20,21 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
+import com.vitorpamplona.quartz.nip01Core.tags.aTag.ATag
+import com.vitorpamplona.quartz.nip01Core.tags.events.ETag
+import com.vitorpamplona.quartz.nip01Core.tags.people.PTag
+import com.vitorpamplona.quartz.nip99Classifieds.ClassifiedsEvent
+
 /** Quartz's `nip99Classifieds` classes. */
 internal fun KindMappers.Builder.nip99Classifieds() {
+    // NIP-99 gives its `e`/`a`/`p` tags no role: they are the notes, listings and people the description cites.
+    on<ClassifiedsEvent> { e ->
+        each(e.tags, ETag::parse) { event(Relation.MENTION, it, ETag.TAG_NAME) }
+        each(e.tags, ATag::parse) { address(Relation.MENTION, it, ATag.TAG_NAME) }
+        each(e.tags, PTag::parse) { user(Relation.MENTION, it, PTag.TAG_NAME) }
+        hashtags(e.tags)
+        contentMentions(e.content)
+    }
 }

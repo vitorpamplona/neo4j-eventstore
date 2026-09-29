@@ -20,6 +20,18 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.quartz.nipXXPodcasting20.episode.Podcasting20EpisodeEvent
+import com.vitorpamplona.quartz.nipXXPodcasting20.episode.tags.EditTag
+import com.vitorpamplona.quartz.nipXXPodcasting20.trailer.Podcasting20TrailerEvent
+
 /** Quartz's `nipXXPodcasting20` classes. */
 internal fun KindMappers.Builder.nipXXPodcasting20() {
+    // `edit` is the event id of the episode's original publication. `person` tags carry names, not keys.
+    on<Podcasting20EpisodeEvent> { e ->
+        event(Relation.EDITED, e.editsEventId(), EditTag.TAG_NAME)
+        hashtags(e.tags)
+    }
+
+    free<Podcasting20TrailerEvent>()
 }

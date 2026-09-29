@@ -20,6 +20,17 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
+import com.vitorpamplona.quartz.nip01Core.tags.people.PTag
+import com.vitorpamplona.quartz.nipA4PublicMessages.PublicMessageEvent
+
 /** Quartz's `nipA4PublicMessages` classes. */
 internal fun KindMappers.Builder.nipA4PublicMessages() {
+    // NIP-A4: `p` tags are the receivers, never mentions; mentions come only from the content.
+    on<PublicMessageEvent> { e ->
+        each(e.tags, PTag::parse) { user(Relation.RECIPIENT, it, PTag.TAG_NAME) }
+        quotes(e.tags)
+        contentMentions(e.citedNIP19())
+    }
 }

@@ -20,6 +20,24 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
+import com.vitorpamplona.quartz.nip01Core.tags.kinds.KindTag
+import com.vitorpamplona.quartz.nip87Ecash.cashu.CashuMintEvent
+import com.vitorpamplona.quartz.nip87Ecash.fedimint.FedimintEvent
+import com.vitorpamplona.quartz.nip87Ecash.recommendation.MintRecommendationEvent
+
 /** Quartz's `nip87Ecash` classes. */
 internal fun KindMappers.Builder.nip87Ecash() {
+    // NIP-87: the recommended mint's announcement (38172 cashu or 38173 fedimint) and the recommended kind (`k`).
+    on<MintRecommendationEvent> { e ->
+        each(
+            e.tags,
+            Nip87RecommendedMintTag::parse,
+        ) { address(Relation.RECOMMENDED, it.address, Nip87RecommendedMintTag.TAG_NAME, it.linkProps()) }
+        each(e.tags, KindTag::parse) { tag(Relation.TAG, KindTag.TAG_NAME, it.toString()) }
+    }
+
+    free<CashuMintEvent>()
+    free<FedimintEvent>()
 }

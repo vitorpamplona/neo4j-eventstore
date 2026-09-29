@@ -20,6 +20,9 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.quartz.nipA3PaymentTargets.PaymentTargetsEvent
+
 /** Quartz's `nipA3PaymentTargets` classes. */
 internal fun KindMappers.Builder.nipA3PaymentTargets() {
+    free<PaymentTargetsEvent>()
 }

@@ -20,6 +20,22 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.PollResponseProps
+import com.vitorpamplona.quartz.nip01Core.tags.people.PTag
+import com.vitorpamplona.quartz.nip88Polls.poll.PollEvent
+import com.vitorpamplona.quartz.nip88Polls.response.PollResponseEvent
+import com.vitorpamplona.quartz.nip88Polls.response.tags.PollTag
+
 /** Quartz's `nip88Polls` classes. */
 internal fun KindMappers.Builder.nip88Polls() {
+    // NIP-88: the poll, with the chosen option ids (in tag order) on the link. The `p` is Quartz's notification of the poll's author.
+    on<PollResponseEvent> { e ->
+        val props = PollResponseProps(e.responses())
+        each(e.tags, PollTag::parse) { event(Relation.POLL, it, PollTag.TAG_NAME, props) }
+        each(e.tags, PTag::parse) { user(Relation.POLL_AUTHOR, it, PTag.TAG_NAME) }
+    }
+
+    free<PollEvent>()
 }

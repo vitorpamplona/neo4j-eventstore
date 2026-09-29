@@ -20,6 +20,13 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
+import com.vitorpamplona.quartz.nip94FileMetadata.FileMetadataEvent
+import com.vitorpamplona.quartz.nip94FileMetadata.tags.TorrentInfoHash
+
 /** Quartz's `nip94FileMetadata` classes. */
 internal fun KindMappers.Builder.nip94FileMetadata() {
+    // NIP-94 carries no event, address or user; its only reference is the torrent infohash in `i`.
+    on<FileMetadataEvent> { e -> each(e.tags, TorrentInfoHash::parse) { tag(Relation.TAG, TorrentInfoHash.TAG_NAME, it) } }
 }

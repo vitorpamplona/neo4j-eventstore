@@ -20,6 +20,19 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.quartz.nip01Core.tags.dTag.DTag
+import com.vitorpamplona.quartz.nip01Core.tags.references.ReferenceTag
+import com.vitorpamplona.quartz.nipB0WebBookmarks.WebBookmarkEvent
+
 /** Quartz's `nipB0WebBookmarks` classes. */
 internal fun KindMappers.Builder.nipB0WebBookmarks() {
+    // The bookmarked URL, which NIP-B0 writes as the `d` tag. Like a NIP-85 assertion's subject, this
+    // `d` names something other than the event itself, so it is a link: `BOOKMARK` to the full URL
+    // (`url()` restores the scheme NIP-B0 drops) as an `r` value, the node every other reference to
+    // that URL shares.
+    on<WebBookmarkEvent> { e ->
+        tag(Relation.BOOKMARK, ReferenceTag.TAG_NAME, e.url(), via = DTag.TAG_NAME)
+        hashtags(e.tags)
+    }
 }

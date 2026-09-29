@@ -20,6 +20,13 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
+import com.vitorpamplona.quartz.nip29RelayGroups.tags.GroupIdTag
+import com.vitorpamplona.quartz.nip7DThreads.ThreadEvent
+
 /** Quartz's `nip7DThreads` classes. */
 internal fun KindMappers.Builder.nip7DThreads() {
+    // A thread posted in a NIP-29 group names it in `h`. Replies are NIP-22 comments that point here.
+    on<ThreadEvent> { e -> each(e.tags, GroupIdTag::parse) { tag(Relation.GROUP, GroupIdTag.TAG_NAME, it) } }
 }
