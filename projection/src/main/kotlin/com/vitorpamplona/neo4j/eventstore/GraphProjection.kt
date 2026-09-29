@@ -169,6 +169,10 @@ class GraphProjection private constructor(
          *
          * [dirtyFile], when given, keeps the feed's owed repairs across a restart: loaded here,
          * saved on [close].
+         *
+         * [hydrator] fills callers' results; it defaults to [source]'s fetch, which the reconciler
+         * uses and which must see EVERYTHING stored. A relay that hides some stored events from
+         * its readers (NIP-40 expired ones) passes a hydrator that hides them too.
          */
         fun open(
             url: String,
@@ -184,8 +188,10 @@ class GraphProjection private constructor(
             requireSafeServer: Boolean = true,
             queueCapacity: Int = GraphFeed.DEFAULT_CAPACITY,
             dirtyFile: File? = null,
+            hydrator: Hydrator? = null,
         ): GraphProjection =
             open(
+                hydrator = hydrator,
                 driver = GraphDatabase.driver(url, AuthTokens.basic(user, password)),
                 ownsDriver = true,
                 cypherDriver = GraphDatabase.driver(url, AuthTokens.basic(user, password)),
@@ -215,6 +221,7 @@ class GraphProjection private constructor(
             queueCapacity: Int = GraphFeed.DEFAULT_CAPACITY,
             cypherDriver: Driver = driver,
             dirtyFile: File? = null,
+            hydrator: Hydrator? = null,
         ): GraphProjection {
             require(queueCapacity >= 1) { "queueCapacity must be >= 1, was $queueCapacity" }
             driver.verifyConnectivity()
@@ -240,7 +247,7 @@ class GraphProjection private constructor(
                 feed = feed,
                 dirty = dirty,
                 reconcileLoop = ReconcileLoop(reconciler, dirty, cursor),
-                cypher = CypherService(cypherDriver, database, Hydrator { ids -> source.fetch(ids) }, audit),
+                cypher = CypherService(cypherDriver, database, hydrator ?: Hydrator { ids -> source.fetch(ids) }, audit),
                 registry = registry,
                 policy = policy,
                 scope = scope,
