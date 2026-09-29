@@ -20,6 +20,14 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
+import com.vitorpamplona.quartz.nip01Core.tags.people.PTag
+import com.vitorpamplona.quartz.nipACWebRtcCalls.events.WebRTCEvent
+
 /** Quartz's `nipACWebRtcCalls` classes. */
 internal fun KindMappers.Builder.nipACWebRtcCalls() {
+    // NIP-AC: every signalling kind names its callee(s) in `p` ("one per member" in group
+    // calls), so the whole family links the same way. `call-id` is a session value, not a link.
+    on<WebRTCEvent> { e -> each(e.tags, PTag::parse) { user(Relation.RECIPIENT, it, PTag.TAG_NAME) } }
 }

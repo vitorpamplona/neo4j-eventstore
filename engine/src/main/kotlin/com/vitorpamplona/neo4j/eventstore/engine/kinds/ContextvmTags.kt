@@ -20,17 +20,32 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
-import com.vitorpamplona.quartz.cyberspace.CyberspaceBagEvent
-import com.vitorpamplona.quartz.cyberspace.deck0003Sno.SnoAvatarEvent
-import com.vitorpamplona.quartz.cyberspace.deck0003Sno.SnoObjectEvent
-import com.vitorpamplona.quartz.cyberspace.deck0003Sno.SnoShardEvent
+import com.vitorpamplona.quartz.contextvm.core.CvmTags
+import com.vitorpamplona.quartz.nip01Core.core.has
 
-/** Quartz's `cyberspace` classes. */
-internal fun KindMappers.Builder.cyberspace() {
-    free<CyberspaceBagEvent>()
+/**
+ * CEP-15's NIP-73 `["i", "<schema-hash>", "<tool-name>"]`: a common schema a server implements.
+ * Main's Quartz has no parser for it (only `CommonToolSchema`'s bulk reader of the content).
+ */
+internal object ContextvmSchemaHashTag {
+    const val TAG_NAME = CvmTags.EXTERNAL_ID
 
-    // The palette reference lives in the SNO JSON content, which a mapper does not parse.
-    free<SnoAvatarEvent>()
-    free<SnoObjectEvent>()
-    free<SnoShardEvent>()
+    /** The schema hash, the identity two equivalent servers share. */
+    fun parse(tag: Array<String>): String? {
+        if (!tag.has(1) || tag[0] != TAG_NAME || tag[1].isBlank()) return null
+        return tag[1]
+    }
+}
+
+/**
+ * CEP-15's NIP-73 `["k", "io.contextvm/common-schema"]`: the namespace the event's `i` tags live
+ * in. A string, not a Nostr kind number, so not the NIP-01 `KindTag`. Main's Quartz has no parser for it.
+ */
+internal object ContextvmSchemaNamespaceTag {
+    const val TAG_NAME = CvmTags.EXTERNAL_KIND
+
+    fun parse(tag: Array<String>): String? {
+        if (!tag.has(1) || tag[0] != TAG_NAME || tag[1].isBlank()) return null
+        return tag[1]
+    }
 }

@@ -20,6 +20,42 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
+import com.vitorpamplona.quartz.marmot.mip00KeyPackages.KeyPackageEvent
+import com.vitorpamplona.quartz.marmot.mip00KeyPackages.KeyPackageRelayListEvent
+import com.vitorpamplona.quartz.marmot.mip00KeyPackages.tags.KeyPackageRefTag
+import com.vitorpamplona.quartz.marmot.mip02Welcome.WelcomeEvent
+import com.vitorpamplona.quartz.marmot.mip02Welcome.tags.KeyPackageEventTag
+import com.vitorpamplona.quartz.marmot.mip03GroupMessages.GroupEvent
+import com.vitorpamplona.quartz.marmot.mip03GroupMessages.tags.GroupIdTag
+import com.vitorpamplona.quartz.marmot.mip05PushNotifications.NotificationRequestEvent
+import com.vitorpamplona.quartz.marmot.mip05PushNotifications.TokenListEvent
+import com.vitorpamplona.quartz.marmot.mip05PushNotifications.TokenRemovalEvent
+import com.vitorpamplona.quartz.marmot.mip05PushNotifications.TokenRequestEvent
+
 /** Quartz's `marmot` classes. */
 internal fun KindMappers.Builder.marmot() {
+    // The KeyPackageRef (`i`), the lookup key a Welcome's inviter resolves.
+    on<KeyPackageEvent> { e -> tag(Relation.TAG, KeyPackageRefTag.TAG_NAME, e.keyPackageRef()) }
+    free<KeyPackageRelayListEvent>()
+
+    // The KeyPackage this Welcome consumed, and the group (its `h`: the Marmot nostr_group_id,
+    // a random global id). This is an unsigned rumor inside a gift wrap, so only the recipient
+    // ever sees these links.
+    on<WelcomeEvent> { e ->
+        event(Relation.KEY_PACKAGE, e.keyPackageEventId(), KeyPackageEventTag.TAG_NAME)
+        each(e.tags, GroupIdTag::parse) { tag(Relation.GROUP, GroupIdTag.TAG_NAME, it) }
+    }
+
+    // The group, by its `h` (the nostr_group_id, a random global id). The signer is a fresh
+    // ephemeral key per event, so the `AUTHOR` link every event states is a throwaway here; the
+    // inner rumors carry their own links once decrypted.
+    on<GroupEvent> { e -> each(e.tags, GroupIdTag::parse) { tag(Relation.GROUP, GroupIdTag.TAG_NAME, it) } }
+
+    free<NotificationRequestEvent>()
+    // Member and server keys live in the JSON content (an inner group payload), which a mapper does not parse.
+    free<TokenListEvent>()
+    free<TokenRemovalEvent>()
+    free<TokenRequestEvent>()
 }

@@ -20,6 +20,28 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.quartz.concord.cord02Community.ConcordCommunityListEvent
+import com.vitorpamplona.quartz.concord.cord02Community.ConcordCommunityListFragmentEvent
+import com.vitorpamplona.quartz.concord.cord03Channels.ConcordChatEditEvent
+import com.vitorpamplona.quartz.concord.cord03Channels.ConcordTimerNoticeEvent
+import com.vitorpamplona.quartz.concord.cord04Roles.control.ControlEditionEvent
+import com.vitorpamplona.quartz.concord.cord05Invites.ConcordInviteListEvent
+import com.vitorpamplona.quartz.concord.cord05Invites.bundle.ConcordInviteBundleEvent
+import com.vitorpamplona.quartz.nip01Core.tags.events.ETag
+
 /** Quartz's `concord` classes. */
 internal fun KindMappers.Builder.concord() {
+    free<ConcordCommunityListEvent>()
+    free<ConcordCommunityListFragmentEvent>()
+
+    // The edited message. The channel/epoch binding tags carry Concord ids, not Nostr references.
+    on<ConcordChatEditEvent> { e -> event(Relation.EDITED, e.editedMessageId(), ETag.TAG_NAME) }
+
+    // Its tags are the channel binding, which no Concord channel message links, and the timer
+    // value: nothing to link.
+    free<ConcordTimerNoticeEvent>()
+    free<ControlEditionEvent>()
+    free<ConcordInviteListEvent>()
+    free<ConcordInviteBundleEvent>()
 }

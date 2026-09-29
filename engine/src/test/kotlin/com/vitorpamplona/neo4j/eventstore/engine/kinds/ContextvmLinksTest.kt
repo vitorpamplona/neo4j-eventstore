@@ -20,17 +20,30 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
-import com.vitorpamplona.quartz.cyberspace.CyberspaceBagEvent
-import com.vitorpamplona.quartz.cyberspace.deck0003Sno.SnoAvatarEvent
-import com.vitorpamplona.quartz.cyberspace.deck0003Sno.SnoObjectEvent
-import com.vitorpamplona.quartz.cyberspace.deck0003Sno.SnoShardEvent
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.quartz.contextvm.cep06Announcements.CvmToolsListEvent
+import kotlin.test.Test
+import kotlin.test.assertEquals
 
-/** Quartz's `cyberspace` classes. */
-internal fun KindMappers.Builder.cyberspace() {
-    free<CyberspaceBagEvent>()
+class ContextvmLinksTest {
+    private val me = "0".repeat(64)
 
-    // The palette reference lives in the SNO JSON content, which a mapper does not parse.
-    free<SnoAvatarEvent>()
-    free<SnoObjectEvent>()
-    free<SnoShardEvent>()
+    @Test
+    fun toolsListLinksItsCommonSchemaIds() {
+        val tags =
+            arrayOf(
+                arrayOf("i", "schemahash1", "create_group"),
+                arrayOf("k", "io.contextvm/common-schema"),
+                arrayOf("p", "1".repeat(64)),
+            )
+        assertEquals(
+            listOf(
+                Link(Relation.TAG, LinkTarget.Tag("i", "schemahash1"), "i"),
+                Link(Relation.TAG, LinkTarget.Tag("k", "io.contextvm/common-schema"), "k"),
+            ),
+            CvmToolsListEvent(me, me, 0, tags, "{\"tools\":[]}", me).links(),
+        )
+    }
 }

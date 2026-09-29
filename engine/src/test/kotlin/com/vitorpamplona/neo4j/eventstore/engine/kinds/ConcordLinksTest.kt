@@ -20,17 +20,29 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
-import com.vitorpamplona.quartz.cyberspace.CyberspaceBagEvent
-import com.vitorpamplona.quartz.cyberspace.deck0003Sno.SnoAvatarEvent
-import com.vitorpamplona.quartz.cyberspace.deck0003Sno.SnoObjectEvent
-import com.vitorpamplona.quartz.cyberspace.deck0003Sno.SnoShardEvent
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.quartz.concord.cord03Channels.ConcordChatEditEvent
+import kotlin.test.Test
+import kotlin.test.assertEquals
 
-/** Quartz's `cyberspace` classes. */
-internal fun KindMappers.Builder.cyberspace() {
-    free<CyberspaceBagEvent>()
+class ConcordLinksTest {
+    private val me = "0".repeat(64)
+    private val message = "e1".repeat(32)
 
-    // The palette reference lives in the SNO JSON content, which a mapper does not parse.
-    free<SnoAvatarEvent>()
-    free<SnoObjectEvent>()
-    free<SnoShardEvent>()
+    @Test
+    fun chatEditLinksTheFirstEditedMessageOnly() {
+        val tags =
+            arrayOf(
+                arrayOf("channel", "concord-channel-id"),
+                arrayOf("e", message),
+                arrayOf("ms", "250"),
+                arrayOf("e", "e2".repeat(32)),
+            )
+        assertEquals(
+            listOf(Link(Relation.EDITED, LinkTarget.Event(message), "e")),
+            ConcordChatEditEvent(me, me, 0, tags, "fixed typo", me).links(),
+        )
+    }
 }
