@@ -20,6 +20,13 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
+import com.vitorpamplona.quartz.nip02FollowList.ContactListEvent
+import com.vitorpamplona.quartz.nip02FollowList.tags.ContactTag
+
 /** Quartz's `nip02FollowList` classes. */
 internal fun KindMappers.Builder.nip02FollowList() {
+    // NIP-02: every `p` is a `FOLLOW`, the social graph. The legacy relay map in the content is not a reference.
+    on<ContactListEvent> { e -> each(e.tags, ContactTag::parse) { user(Relation.FOLLOW, it.pubKey, ContactTag.TAG_NAME) } }
 }

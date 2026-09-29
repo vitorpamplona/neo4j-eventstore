@@ -20,17 +20,37 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
-import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
-import com.vitorpamplona.quartz.nip03Timestamp.OtsEvent
-import com.vitorpamplona.quartz.nip03Timestamp.tags.TargetEventKindTag
-import com.vitorpamplona.quartz.nip03Timestamp.tags.TargetEventTag
+import com.vitorpamplona.quartz.nip30CustomEmoji.selection.EmojiListEvent
+import kotlin.test.Test
+import kotlin.test.assertEquals
 
-/** Quartz's `nip03Timestamp` classes. */
-internal fun KindMappers.Builder.nip03Timestamp() {
-    // NIP-03: the `e` is the event the proof timestamps, the `k` its kind.
-    on<OtsEvent> { e ->
-        each(e.tags, TargetEventTag::parse) { event(Relation.TIMESTAMPED, it, TargetEventTag.TAG_NAME) }
-        each(e.tags, TargetEventKindTag::parse) { tag(Relation.TAG, TargetEventKindTag.TAG_NAME, it.toString()) }
+class Nip30CustomEmojiLinksTest {
+    @Test
+    fun theEmojiListHoldsTheSetsTheUserPicked() {
+        val creator = "b1".repeat(32)
+        val event =
+            EmojiListEvent(
+                "0".repeat(64),
+                "f".repeat(64),
+                1L,
+                arrayOf(
+                    arrayOf("emoji", "gleasonator", "https://img.example/gleasonator.png"),
+                    arrayOf("a", "30030:$creator:blobcats"),
+                    arrayOf("a", "30030:$creator:pepes", "wss://relay.example/"),
+                ),
+                "",
+                "0".repeat(128),
+            )
+
+        assertEquals(
+            listOf(
+                Link(Relation.MEMBER, LinkTarget.Address("30030:$creator:blobcats"), "a"),
+                Link(Relation.MEMBER, LinkTarget.Address("30030:$creator:pepes"), "a"),
+            ),
+            event.links(),
+        )
     }
 }

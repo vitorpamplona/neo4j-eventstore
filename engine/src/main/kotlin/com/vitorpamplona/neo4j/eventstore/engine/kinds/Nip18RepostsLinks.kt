@@ -20,6 +20,41 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkBuilder
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
+import com.vitorpamplona.quartz.nip01Core.core.TagArray
+import com.vitorpamplona.quartz.nip01Core.tags.aTag.ATag
+import com.vitorpamplona.quartz.nip01Core.tags.events.ETag
+import com.vitorpamplona.quartz.nip01Core.tags.kinds.KindTag
+import com.vitorpamplona.quartz.nip01Core.tags.people.PTag
+import com.vitorpamplona.quartz.nip18Reposts.GenericRepostEvent
+import com.vitorpamplona.quartz.nip18Reposts.RepostEvent
+import com.vitorpamplona.quartz.utils.lastNotNullOfOrNull
+
 /** Quartz's `nip18Reposts` classes. */
 internal fun KindMappers.Builder.nip18Reposts() {
+    on<RepostEvent> { e -> nip18RepostLinks(e.tags) }
+    on<GenericRepostEvent> { e -> nip18RepostLinks(e.tags) }
+}
+
+/**
+ * NIP-18 links of kinds 6 and 16. The reposted event is the LAST `e` (and, for an addressable
+ * one, the last `a`), as `BaseRepostEvent.boostedEventId` reads it, and its author the last `p`.
+ * Any earlier `e`/`a`/`p` is not part of the repost and is a `MENTION`; `k` is the reposted kind.
+ * The reposted event's JSON in the content is the same event as the `e`, not another link.
+ */
+private fun LinkBuilder.nip18RepostLinks(tags: TagArray) {
+    val reposted = tags.lastNotNullOfOrNull(ETag::parse)
+    val repostedAddress = tags.lastNotNullOfOrNull(ATag::parse)
+    val author = tags.lastNotNullOfOrNull(PTag::parse)
+
+    event(Relation.REPOSTED, reposted, ETag.TAG_NAME)
+    address(Relation.REPOSTED, repostedAddress, ATag.TAG_NAME)
+    user(Relation.REPOSTED_AUTHOR, author, PTag.TAG_NAME)
+
+    each(tags, ETag::parse) { if (it.eventId != reposted?.eventId) event(Relation.MENTION, it, ETag.TAG_NAME) }
+    each(tags, ATag::parse) { if (it.toTag() != repostedAddress?.toTag()) address(Relation.MENTION, it, ATag.TAG_NAME) }
+    each(tags, PTag::parse) { if (it.pubKey != author?.pubKey) user(Relation.MENTION, it, PTag.TAG_NAME) }
+    each(tags, KindTag::parse) { tag(Relation.TAG, KindTag.TAG_NAME, it.toString()) }
 }

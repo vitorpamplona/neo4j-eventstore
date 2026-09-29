@@ -1,0 +1,97 @@
+/*
+ * Copyright (c) 2026 Vitor Pamplona
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy of
+ * this software and associated documentation files (the "Software"), to deal in
+ * the Software without restriction, including without limitation the rights to use,
+ * copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the
+ * Software, and to permit persons to whom the Software is furnished to do so,
+ * subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+ * FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+ * COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+ * AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+ * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
+package com.vitorpamplona.neo4j.eventstore.engine.kinds
+
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.ServiceProps
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.SubjectProps
+import com.vitorpamplona.quartz.nip01Core.core.TagArray
+import com.vitorpamplona.quartz.nip01Core.core.fastFirstNotNullOfOrNull
+import com.vitorpamplona.quartz.nip01Core.core.has
+import com.vitorpamplona.quartz.nip85TrustedAssertions.list.tags.ServiceProviderTag
+import com.vitorpamplona.quartz.nip85TrustedAssertions.tags.CommentCountTag
+import com.vitorpamplona.quartz.nip85TrustedAssertions.tags.QuoteCountTag
+import com.vitorpamplona.quartz.nip85TrustedAssertions.tags.ReactionCountTag
+import com.vitorpamplona.quartz.nip85TrustedAssertions.tags.RepostCountTag
+import com.vitorpamplona.quartz.nip85TrustedAssertions.tags.ZapAmountTag
+import com.vitorpamplona.quartz.nip85TrustedAssertions.tags.ZapCountTag
+import com.vitorpamplona.quartz.nip85TrustedAssertions.users.UserAssertionEvent
+import com.vitorpamplona.quartz.nip85TrustedAssertions.users.tags.RankTag
+import com.vitorpamplona.quartz.utils.ensure
+
+/**
+ * The `k` of a kind 30385 assertion: the NIP-73 kind of the identifier it scores (`isbn`,
+ * `podcast:guid`, `web`, …). A NIP-73 kind is a name, not an event kind number, so main's
+ * numeric `KindTag` cannot read it, and main has no parser of its own for it.
+ */
+internal object Nip85ExternalIdKindTag {
+    const val TAG_NAME = "k"
+
+    fun parse(tag: Array<String>): String? {
+        ensure(tag.has(1)) { return null }
+        ensure(tag[0] == TAG_NAME) { return null }
+        ensure(tag[1].isNotEmpty()) { return null }
+        return tag[1]
+    }
+}
+
+/**
+ * The scores a NIP-85 event, address or external-id assertion (30383-30385) states about its
+ * subject, each read by its metric tag ([RankTag], [CommentCountTag], …): the props of its
+ * `SUBJECT` link. The first of each wins, as the classes' accessors read them.
+ */
+internal fun TagArray.nip85ContentSubjectProps() =
+    SubjectProps(
+        rank = fastFirstNotNullOfOrNull(RankTag::parse),
+        commentCount = fastFirstNotNullOfOrNull(CommentCountTag::parse),
+        quoteCount = fastFirstNotNullOfOrNull(QuoteCountTag::parse),
+        repostCount = fastFirstNotNullOfOrNull(RepostCountTag::parse),
+        reactionCount = fastFirstNotNullOfOrNull(ReactionCountTag::parse),
+        zapCount = fastFirstNotNullOfOrNull(ZapCountTag::parse),
+        zapAmount = fastFirstNotNullOfOrNull(ZapAmountTag::parse),
+    )
+
+/** The public scores a 30382 card states about `aboutUser`, each read by its metric tag's accessor. */
+internal fun UserAssertionEvent.nip85SubjectProps() =
+    SubjectProps(
+        rank = rank(),
+        followers = followerCount(),
+        hops = hops(),
+        firstCreatedAt = firstCreatedAt(),
+        postCount = postCount(),
+        replyCount = replyCount(),
+        reactionsCount = reactionsCount(),
+        zapAmountReceived = zapAmountReceived(),
+        zapAmountSent = zapAmountSent(),
+        zapCountReceived = zapCountReceived(),
+        zapCountSent = zapCountSent(),
+        zapAvgAmountDayReceived = zapAvgAmountDayReceived(),
+        zapAvgAmountDaySent = zapAvgAmountDaySent(),
+        reportsCountReceived = reportsCountReceived(),
+        reportsCountSent = reportsCountSent(),
+        activeHoursStart = activeHoursStart(),
+        activeHoursEnd = activeHoursEnd(),
+    )
+
+/** The tag's name is the service it delegates (`30382:rank`): unlike most tags, it varies. */
+internal fun ServiceProviderTag.nip85TagName() = service.toValue()
+
+/** The service the provider is trusted for, on the link to the provider. */
+internal fun ServiceProviderTag.nip85LinkProps() = ServiceProps(service.toValue())

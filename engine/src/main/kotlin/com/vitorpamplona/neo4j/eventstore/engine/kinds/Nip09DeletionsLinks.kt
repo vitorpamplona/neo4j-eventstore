@@ -20,6 +20,22 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
+import com.vitorpamplona.quartz.nip01Core.tags.aTag.ATag
+import com.vitorpamplona.quartz.nip01Core.tags.events.ETag
+import com.vitorpamplona.quartz.nip01Core.tags.kinds.KindTag
+import com.vitorpamplona.quartz.nip01Core.tags.people.PTag
+import com.vitorpamplona.quartz.nip09Deletions.DeletionRequestEvent
+
 /** Quartz's `nip09Deletions` classes. */
 internal fun KindMappers.Builder.nip09Deletions() {
+    // NIP-09: the `e`/`a` tags are what this request deletes and `k` their kinds. The `p` is
+    // Quartz's practice (not in NIP-09): the deleted events' author.
+    on<DeletionRequestEvent> { e ->
+        each(e.tags, ETag::parse) { event(Relation.DELETED, it, ETag.TAG_NAME) }
+        each(e.tags, ATag::parse) { address(Relation.DELETED, it, ATag.TAG_NAME) }
+        each(e.tags, PTag::parse) { user(Relation.DELETED_AUTHOR, it, PTag.TAG_NAME) }
+        each(e.tags, KindTag::parse) { tag(Relation.TAG, KindTag.TAG_NAME, it.toString()) }
+    }
 }

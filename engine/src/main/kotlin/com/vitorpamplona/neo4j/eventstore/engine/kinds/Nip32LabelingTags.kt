@@ -20,17 +20,7 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
-import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
-import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
-import com.vitorpamplona.quartz.nip03Timestamp.OtsEvent
-import com.vitorpamplona.quartz.nip03Timestamp.tags.TargetEventKindTag
-import com.vitorpamplona.quartz.nip03Timestamp.tags.TargetEventTag
+import com.vitorpamplona.quartz.nip32Labeling.tags.LabelTag
 
-/** Quartz's `nip03Timestamp` classes. */
-internal fun KindMappers.Builder.nip03Timestamp() {
-    // NIP-03: the `e` is the event the proof timestamps, the `k` its kind.
-    on<OtsEvent> { e ->
-        each(e.tags, TargetEventTag::parse) { event(Relation.TIMESTAMPED, it, TargetEventTag.TAG_NAME) }
-        each(e.tags, TargetEventKindTag::parse) { tag(Relation.TAG, TargetEventKindTag.TAG_NAME, it.toString()) }
-    }
-}
+/** `<namespace>:<label>`: one label, told apart from the same word in another namespace. Main's [LabelTag] has no `qualified()`. */
+internal fun LabelTag.nip32Qualified() = "$namespace:$label"

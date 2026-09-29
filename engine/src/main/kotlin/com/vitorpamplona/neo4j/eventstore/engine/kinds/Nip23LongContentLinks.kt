@@ -20,6 +20,26 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
+import com.vitorpamplona.quartz.nip01Core.tags.aTag.ATag
+import com.vitorpamplona.quartz.nip01Core.tags.events.ETag
+import com.vitorpamplona.quartz.nip01Core.tags.people.PTag
+import com.vitorpamplona.quartz.nip23LongContent.LongFormContentEvent
+
 /** Quartz's `nip23LongContent` classes. */
 internal fun KindMappers.Builder.nip23LongContent() {
+    // NIP-23: "references to other notes, articles or profiles must be made according to NIP-27
+    // ... optionally adding tags for these", so the `e`/`a`/`p` tags are mentions, like the
+    // `nostr:` URIs in the text. An article has no thread: though it extends `BaseThreadedEvent`,
+    // its `e`/`a` are never a root or a parent.
+    on<LongFormContentEvent> { e ->
+        each(e.tags, ETag::parse) { event(Relation.MENTION, it, ETag.TAG_NAME) }
+        each(e.tags, ATag::parse) { address(Relation.MENTION, it, ATag.TAG_NAME) }
+        each(e.tags, PTag::parse) { user(Relation.MENTION, it, PTag.TAG_NAME) }
+        quotes(e.tags)
+        hashtags(e.tags)
+
+        contentMentions(e.citedNIP19())
+    }
 }

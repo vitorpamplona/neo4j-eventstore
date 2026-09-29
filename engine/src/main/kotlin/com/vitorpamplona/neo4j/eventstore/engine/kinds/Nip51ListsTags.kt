@@ -20,17 +20,14 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
-import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
-import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
-import com.vitorpamplona.quartz.nip03Timestamp.OtsEvent
-import com.vitorpamplona.quartz.nip03Timestamp.tags.TargetEventKindTag
-import com.vitorpamplona.quartz.nip03Timestamp.tags.TargetEventTag
+import com.vitorpamplona.quartz.nip51Lists.bookmarkList.OldBookmarkListEvent
+import com.vitorpamplona.quartz.nip51Lists.kindMuteSet.KindMuteSetEvent
 
-/** Quartz's `nip03Timestamp` classes. */
-internal fun KindMappers.Builder.nip03Timestamp() {
-    // NIP-03: the `e` is the event the proof timestamps, the `k` its kind.
-    on<OtsEvent> { e ->
-        each(e.tags, TargetEventTag::parse) { event(Relation.TIMESTAMPED, it, TargetEventTag.TAG_NAME) }
-        each(e.tags, TargetEventKindTag::parse) { tag(Relation.TAG, TargetEventKindTag.TAG_NAME, it.toString()) }
-    }
+/** The `d` values of the deprecated kind 30001 ([OldBookmarkListEvent]) that name the list it stood for; main names none. */
+internal object Nip51OldBookmarkDTags {
+    const val PIN_D_TAG = "pin"
+    const val COMMUNITIES_D_TAG = "communities"
 }
+
+/** The kind a [KindMuteSetEvent] mutes its users for: its `d`. Main has no accessor for it. */
+internal fun KindMuteSetEvent.nip51MutedKind() = dTag().toIntOrNull()

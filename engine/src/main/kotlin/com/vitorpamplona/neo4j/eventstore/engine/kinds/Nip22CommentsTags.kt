@@ -20,17 +20,27 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
-import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
-import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
-import com.vitorpamplona.quartz.nip03Timestamp.OtsEvent
-import com.vitorpamplona.quartz.nip03Timestamp.tags.TargetEventKindTag
-import com.vitorpamplona.quartz.nip03Timestamp.tags.TargetEventTag
+import com.vitorpamplona.quartz.nip01Core.core.HexKey
+import com.vitorpamplona.quartz.nip01Core.core.fastForEach
+import com.vitorpamplona.quartz.nip22Comments.CommentEvent
+import com.vitorpamplona.quartz.nip22Comments.tags.ReplyAddressTag
+import com.vitorpamplona.quartz.nip22Comments.tags.ReplyEventTag
 
-/** Quartz's `nip03Timestamp` classes. */
-internal fun KindMappers.Builder.nip03Timestamp() {
-    // NIP-03: the `e` is the event the proof timestamps, the `k` its kind.
-    on<OtsEvent> { e ->
-        each(e.tags, TargetEventTag::parse) { event(Relation.TIMESTAMPED, it, TargetEventTag.TAG_NAME) }
-        each(e.tags, TargetEventKindTag::parse) { tag(Relation.TAG, TargetEventKindTag.TAG_NAME, it.toString()) }
+/**
+ * The authors the parent tags themselves name: the pubkey slot of an `e` ([ReplyEventTag]),
+ * the coordinate's pubkey of an `a` ([ReplyAddressTag]). Only a `p` among these is the
+ * parent's author; NIP-22 also adds a `p` for every pubkey the content mentions. Main's
+ * [CommentEvent] has no such accessor.
+ */
+internal fun CommentEvent.nip22ParentTagAuthors(): Set<HexKey> {
+    val authors = HashSet<HexKey>()
+    tags.fastForEach { tag ->
+        ReplyEventTag
+            .parse(tag)
+            ?.ref
+            ?.author
+            ?.let { authors.add(it) }
+        ReplyAddressTag.parseAddress(tag)?.let { authors.add(it.pubKeyHex) }
     }
+    return authors
 }

@@ -20,6 +20,14 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
+import com.vitorpamplona.quartz.nip01Core.metadata.MetadataEvent
+import com.vitorpamplona.quartz.nip39ExtIdentities.IdentityClaimTag
+
 /** Quartz's `nip01Core` classes. */
 internal fun KindMappers.Builder.nip01Core() {
+    // The NIP-39 identity claims mirrored as `i` tags (`github:<user>`, …) are external ids. The
+    // profile JSON's own values (names, pictures, `about`) are not references.
+    on<MetadataEvent> { e -> each(e.tags, IdentityClaimTag::parse) { tag(Relation.TAG, IdentityClaimTag.TAG_NAME, it.platformIdentity()) } }
 }

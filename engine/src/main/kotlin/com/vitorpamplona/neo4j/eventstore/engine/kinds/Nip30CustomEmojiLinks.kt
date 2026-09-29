@@ -20,6 +20,16 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
+import com.vitorpamplona.quartz.nip01Core.tags.aTag.ATag
+import com.vitorpamplona.quartz.nip30CustomEmoji.pack.EmojiPackEvent
+import com.vitorpamplona.quartz.nip30CustomEmoji.selection.EmojiListEvent
+
 /** Quartz's `nip30CustomEmoji` classes. */
 internal fun KindMappers.Builder.nip30CustomEmoji() {
+    free<EmojiPackEvent>()
+
+    // NIP-51: the `a` pointers to the emoji sets (kind 30030) the user picked. Loose `emoji` tags are URLs.
+    on<EmojiListEvent> { e -> each(e.tags, ATag::parse) { address(Relation.MEMBER, it, ATag.TAG_NAME) } }
 }

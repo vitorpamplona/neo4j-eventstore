@@ -20,22 +20,42 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
-import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
-import com.vitorpamplona.quartz.nip01Core.tags.aTag.ATag
-import com.vitorpamplona.quartz.nip01Core.tags.events.ETag
-import com.vitorpamplona.quartz.nip01Core.tags.people.PTag
-import com.vitorpamplona.quartz.nip01Core.tags.references.ReferenceTag
 import com.vitorpamplona.quartz.nip38UserStatus.UserStatusEvent
+import kotlin.test.Test
+import kotlin.test.assertEquals
 
-/** Quartz's `nip38UserStatus` classes. */
-internal fun KindMappers.Builder.nip38UserStatus() {
-    // NIP-38: a status may link to a profile, a note or an addressable event (`p`/`e`/`a`), each
-    // `LINKED`, and to a URL (`r`). The `d` is the status type, not a reference.
-    on<UserStatusEvent> { e ->
-        each(e.tags, ReferenceTag::parse) { tag(Relation.TAG, ReferenceTag.TAG_NAME, it) }
-        each(e.tags, PTag::parse) { user(Relation.LINKED, it, PTag.TAG_NAME) }
-        each(e.tags, ETag::parse) { event(Relation.LINKED, it, ETag.TAG_NAME) }
-        each(e.tags, ATag::parse) { address(Relation.LINKED, it, ATag.TAG_NAME) }
+class Nip38UserStatusLinksTest {
+    @Test
+    fun aStatusLinksWhatItPointsTo() {
+        val person = "b1".repeat(32)
+        val note = "e1".repeat(32)
+        val event =
+            UserStatusEvent(
+                "0".repeat(64),
+                "f".repeat(64),
+                1L,
+                arrayOf(
+                    arrayOf("d", "music"),
+                    arrayOf("r", "spotify:search:Intergalatic%20-%20Beastie%20Boys"),
+                    arrayOf("p", person),
+                    arrayOf("e", note),
+                    arrayOf("a", "30023:$person:post"),
+                ),
+                "Intergalatic - Beastie Boys",
+                "0".repeat(128),
+            )
+
+        assertEquals(
+            listOf(
+                Link(Relation.TAG, LinkTarget.Tag("r", "spotify:search:Intergalatic%20-%20Beastie%20Boys"), "r"),
+                Link(Relation.LINKED, LinkTarget.User(person), "p"),
+                Link(Relation.LINKED, LinkTarget.Event(note), "e"),
+                Link(Relation.LINKED, LinkTarget.Address("30023:$person:post"), "a"),
+            ),
+            event.links(),
+        )
     }
 }
