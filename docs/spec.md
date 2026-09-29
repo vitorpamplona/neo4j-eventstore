@@ -32,7 +32,11 @@ Neo4j answers the questions Vespa cannot: multi-hop joins.
 3. **A bounded traversal query language** (`Traversal`). It is a typed Kotlin model with a JSON
    wire form, compiled to Cypher the way vespa-eventstore compiles `EventQuery` to YQL. An
    in-memory executable spec defines its semantics.
-4. **Synced with the Vespa store in vespa-relay.** Every event Vespa accepts reaches Neo4j. Drift
+3b. **A read-only Cypher endpoint** (§8.2). This covers everything the traversal language cannot
+   express: aggregations, path algorithms, ad-hoc exploration. The graph schema is therefore a
+   **public query contract**, documented and versioned (§8.2.6).
+4. **Synced with the Vespa store in vespa-relay.** Every event Vespa accepts reaches Neo4j,
+   except the DM-metadata kinds the relay deliberately does not replicate (D3, §8.2.4). Drift
    from crashes, queue overflow, or Vespa-only maintenance is detected and repaired automatically.
 5. **The same engineering model as vespa-eventstore:**
    - modules `:engine` / `:store` / `:benchmark`;
@@ -148,7 +152,7 @@ GraphReads  ◀──────────│   NostrSemanticsStore( Metered(
 interface GraphIndex : AutoCloseable {
     /** Runs a bounded [Traversal]; see §7 for semantics. Never partial silently: truncation is reported. */
     suspend fun traverse(t: Traversal): TraversalResult
-    /** O(1) degree for one relationship type/direction (dense-node counts), e.g. follower count = degree(User, "#p/3", IN). */
+    /** O(1) degree for one relationship type/direction (dense-node counts), e.g. follower count = degree(User, "p_3", IN). */
     suspend fun degree(node: NodeRef, type: String, dir: Direction): Long
     /** The edges one stored event contributed, as derived — the debug/explain surface (/graph/explain/{id}). */
     suspend fun edgesOf(eventId: String): List<EdgeView>
@@ -210,30 +214,35 @@ graph-specific code**: they all funnel into `remove`, the same property vespa-ev
 
 | Type | From → To | Meaning |
 |---|---|---|
-| `` `by/<k>` `` | Event → User | Authorship, `<k>` = the event's kind |
-| `` `#<t>/<k>` `` | Event → Event \| User \| Address \| Tag | The event (kind `<k>`) carries the literal single-letter tag `<t>` pointing there |
-| `` `~<f>/<k>` `` | Event → Event \| User \| Address | A **derived** reference of family `<f>` ∈ {`e`,`p`,`a`}: a link Quartz names that is *not* a literal single-letter tag (content `nostr:` URIs, multi-letter tags such as `zap` / `pinned` / `exercise` / `30382:rank`, embedded events) |
+| `` `by_<k>` `` | Event → User | Authorship, `<k>` = the event's kind |
+| `` `<t>_<k>` `` | Event → Event \| User \| Address \| Tag | The event (kind `<k>`) carries the literal single-letter tag `<t>` pointing there |
+| `` `ref_<f>_<k>` `` | Event → Event \| User \| Address | A **derived** reference of family `<f>` ∈ {`e`,`p`,`a`}: a link Quartz names that is *not* a literal single-letter tag (content `nostr:` URIs, multi-letter tags such as `zap` / `pinned` / `exercise` / `30382:rank`, embedded events) |
 | `VERSION_OF` | Event → Address | This stored event is the current version of that address. There is at most one incoming per address, because the policy keeps only the winner. |
 | `OWNED_BY` | Address → User | The address's pubkey. This exists for stubs too, so a reference to an unseen article still reaches its author. |
+
+**Type names are plain Cypher identifiers.** They are part of the public query contract (§8.2),
+so users can write `(:User)<-[:p_3]-()` without backticks. A single-letter tag prefix (`p_`,
+`E_`), `by_` and `ref_` can never collide. Neo4j type names are case-sensitive, so `e_1111`
+(NIP-22 reply) and `E_1111` (NIP-22 root) stay distinct.
 
 **Kind in the type name.** Neo4j groups a dense node's relationships by **type and direction**.
 Putting the source kind in the type makes these expansions touch only the relevant
 relationships:
 
-- "kind-3 lists that p-tag X": `(x)<-[:`#p/3`]-()`
-- "reactions to note N": `(n)<-[:`#e/7`]-()`
+- "kind-3 lists that p-tag X": `(x)<-[:p_3]-()`
+- "reactions to note N": `(n)<-[:e_7]-()`
 
 An account with millions of incoming p-tags does not scan its mentions to find its followers.
-It also makes degree **O(1)**: `COUNT { (u)<-[:`#p/3`]-() }` is the follower count, read from
+It also makes degree **O(1)**: `COUNT { (u)<-[:p_3]-() }` is the follower count, read from
 the dense-node group.
 
 **Kind registry.** Only kinds in the store's `KindRegistry` get their own type. The default
 registry is every kind `EventFactory.isKnownKind` recognises at the pinned Quartz. Other kinds
-collapse to `` `#<t>/*` `` / `` `~<f>/*` `` / `` `by/*` `` with a `kind` relationship property.
+collapse to `` `<t>_other` `` / `` `ref_<f>_other` `` / `` `by_other` `` with a `kind` relationship property.
 
 - This bounds the relationship-type count: Quartz knows ~400 kinds × the tag letters actually
   used. Neo4j's type-token limit is not reached by spam kinds.
-- A Quartz bump that learns a new kind moves existing `/*` edges to the new type through
+- A Quartz bump that learns a new kind moves existing `_other` edges to the new type through
   `KindRegistryMigration`. It runs once at `open()`, is resumable, and is recorded in `:Meta`,
   the same pattern as vespa-eventstore's `TrustKeyingMigration`.
 
@@ -241,13 +250,13 @@ collapse to `` `#<t>/*` `` / `` `~<f>/*` `` / `` `by/*` `` with a `kind` relatio
 
 | Property | On | Meaning |
 |---|---|---|
-| `pos` | `#…` | Index of the first tag in the event's tag array that produced this edge |
-| `relay` | `#…`, `~…` | The relay hint (tag element 2, or the NIP-19 TLV relay) |
-| `marker` | `#e`, `#a`, `#q` | Tag element 3 verbatim (`root` / `reply` / `mention` / `fork` / …) |
-| `roles` | `#…`, `~…` | The semantic roles, from the role table (§5.3), e.g. `["root","reply"]` |
-| `via` | `~…` | Where a derived link came from: `content`, `embedded`, or the multi-letter tag name |
+| `pos` | `<t>_…` | Index of the first tag in the event's tag array that produced this edge |
+| `relay` | `<t>_…`, `ref_…` | The relay hint (tag element 2, or the NIP-19 TLV relay) |
+| `marker` | `e_…`, `a_…`, `q_…` | Tag element 3 verbatim (`root` / `reply` / `mention` / `fork` / …) |
+| `roles` | `<t>_…`, `ref_…` | The semantic roles, from the role table (§5.3), e.g. `["root","reply"]` |
+| `via` | `ref_…` | Where a derived link came from: `content`, `embedded`, or the multi-letter tag name |
 | `at` | all | The source event's `created_at`, denormalized so time-bounded expansions filter without touching the source node |
-| `kind` | `/*` types only | The source kind |
+| `kind` | `_other` types only | The source kind |
 
 **One edge per (source, target, type).** Duplicate tags collapse. A tag that names the same
 target twice with different markers unions its `roles`.
@@ -320,7 +329,7 @@ For each tag `[n, v, …]` with `isIndexableTagName(n)` (Quartz: one ASCII lette
 6. Otherwise → **Tag** `n:v`, if `v` is at most 1,024 UTF-8 bytes; longer values are not
    indexed (§6.3).
 
-This emits `` `#<n>/<k>` `` with `pos`, `relay` (element 2 if it normalizes as a relay URL) and
+This emits `` `<n>_<k>` `` with `pos`, `relay` (element 2 if it normalizes as a relay URL) and
 `marker` (element 3).
 
 **Why the providers come first even though rule 5 would catch most of them:**
@@ -333,7 +342,7 @@ This emits `` `#<n>/<k>` `` with `pos`, `relay` (element 2 if it normalizes as a
 ### 5.3 Step 3 — derived links and roles
 
 **Derived edges.** Every id in `L_e ∪ L_p ∪ L_a` that **no literal single-letter tag produced**
-becomes a `` `~<f>/<k>` `` edge. The `via` property is:
+becomes a `` `ref_<f>_<k>` `` edge. The `via` property is:
 
 - `content` for ids found by `findNostrUris(content)`, i.e. the classes whose providers include
   `citedNIP19()`, 14 of them;
@@ -346,9 +355,9 @@ becomes a `` `~<f>/<k>` `` edge. The `via` property is:
 |---|---|
 | **Drop content `nsec1…` entities** from `L_p` | `ListEntityExt.pubKeys()` maps `NSec` to its hex, a *private key*. The deriver re-scans content, removes any hex that came from an `NSec`, and never writes it. This is a security requirement: tested, never optional. |
 | Drop self-links (`v == event.id`) | `ChannelCreateEvent.linkedEventIds()` returns its own id. |
-| **Kind 9735**: add `~p/9735 {via:"description", roles:["zapper"]}` → the embedded zap request's author, and `~e/9735 {via:"description"}` → the request's id | The receipt's providers omit the sender. The sender is the most useful zap edge ("who zapped whom"). A literal `P` tag, when present, is already a `#P/9735`. |
-| **Kind 10040**: `~p/10040 {via:"<kind>:<service>"}` → service pubkey, per `ServiceProviderTag` (tag name e.g. `30382:rank`) | The trust-provider list names services in multi-letter tags. It does not implement a provider. |
-| **Kinds 6/16**: `~e` / `~p` `{via:"embedded"}` to the embedded event's id and author, when the content carries it and no literal tag names them | Reposts often embed the original. |
+| **Kind 9735**: add `ref_p_9735 {via:"description", roles:["zapper"]}` → the embedded zap request's author, and `ref_e_9735 {via:"description"}` → the request's id | The receipt's providers omit the sender. The sender is the most useful zap edge ("who zapped whom"). A literal `P` tag, when present, is already a `P_9735`. |
+| **Kind 10040**: `ref_p_10040 {via:"<kind>:<service>"}` → service pubkey, per `ServiceProviderTag` (tag name e.g. `30382:rank`) | The trust-provider list names services in multi-letter tags. It does not implement a provider. |
+| **Kinds 6/16**: `ref_e_<k>` / `ref_p_<k>` `{via:"embedded"}` to the embedded event's id and author, when the content carries it and no literal tag names them | Reposts often embed the original. |
 | Kind 30023 / 2004 `a` tags | Their providers omit plain `a`. Rule 5 already catches the literal `a`, so this rule is **none needed**; it is listed so nobody "fixes" it twice. |
 
 **Roles.** `RoleTable` assigns `roles` per (kind, tag name, marker) using Quartz's own helpers,
@@ -378,7 +387,7 @@ so the thread and zap semantics are Quartz's and are not re-implemented:
 
 The role table is **data** (`RoleTable.kt`) with one golden test per row. Roles are a convenience
 for traversal (§7.2 `role:` steps). They never affect NIP-01 filter semantics, which use only the
-literal `#<t>` edges.
+literal `<t>_<k>` edges.
 
 ### 5.4 Worked example
 
@@ -386,12 +395,12 @@ A NIP-10 reply (kind 1) with `["e",R,"wss://a","root"]`, `["e",P,"","reply"]`, `
 `["t","nostr"]`, and content `"… nostr:npub1<Y> …"` produces:
 
 ```
-(ev:Event:Stored {id, kind:1, …})-[:`by/1`]->(:User {pubkey: author})
-(ev)-[:`#e/1` {pos:0, relay:"wss://a/", marker:"root",  roles:["root"],  at}]->(:Event {id:R})
-(ev)-[:`#e/1` {pos:1,                  marker:"reply", roles:["reply"], at}]->(:Event {id:P})
-(ev)-[:`#p/1` {pos:2, roles:["mention"], at}]->(:User {pubkey:X})
-(ev)-[:`#t/1` {pos:3, at}]->(:Tag {key:"t:nostr"})
-(ev)-[:`~p/1` {via:"content", roles:["mention"], at}]->(:User {pubkey:Y})
+(ev:Event:Stored {id, kind:1, …})-[:by_1]->(:User {pubkey: author})
+(ev)-[:`e_1` {pos:0, relay:"wss://a/", marker:"root",  roles:["root"],  at}]->(:Event {id:R})
+(ev)-[:`e_1` {pos:1,                  marker:"reply", roles:["reply"], at}]->(:Event {id:P})
+(ev)-[:`p_1` {pos:2, roles:["mention"], at}]->(:User {pubkey:X})
+(ev)-[:`t_1` {pos:3, at}]->(:Tag {key:"t:nostr"})
+(ev)-[:`ref_p_1` {via:"content", roles:["mention"], at}]->(:User {pubkey:Y})
 ```
 
 ---
@@ -427,11 +436,11 @@ The compiler picks an **anchor** and then filters:
    - The compiler **unions every node kind the literal could live in**, so it never trusts
      classification for filter correctness. Each branch is a unique-key seek, so the union is
      cheap.
-   - It expands **incoming** `` `#<t>/<k>` `` edges. Known `kinds` give exact types; otherwise it
-     uses every `#<t>/…` type in `relTypes()`.
+   - It expands **incoming** `` `<t>_<k>` `` edges. Known `kinds` give exact types; otherwise it
+     uses every `<t>_…` type in `relTypes()`.
    - Remaining predicates are applied to the source event: other tags as `EXISTS {…}`,
      `kinds`, `authors`, `since`/`until` (inclusive), `notExpiredAt`, `expiresBefore`.
-3. **`authors`**: expand `` `by/<k>` `` from each `:User`, or use `:Stored(pubkey, kind)`.
+3. **`authors`**: expand `` `by_<k>` `` from each `:User`, or use `:Stored(pubkey, kind)`.
 4. **`kinds` only**: `:Stored(kind, created_at)`.
 5. **Nothing**: `:Stored(created_at)`.
 
@@ -541,7 +550,7 @@ data class ResultSpec(
    ask "what do people keep replying to that we don't have?".
 5. `Out` / `In` with `roles` expand to the relationship types whose role table can produce that
    role, then filter on `roles`. `tags` restricts by the literal tag letter. `derived = false`
-   excludes `~` edges.
+   excludes `ref_…` edges.
 6. **Limits** are server-side, not client-chosen:
    - `maxSteps` 6;
    - `fanout` default 1,000, maximum 10,000;
@@ -574,7 +583,7 @@ zapped, ranked by how many of my follows zapped each*.
 - `as` names a step's output set so a later `where` can reference it (`{"ref": …}`). This is
   what makes "people I follow" usable twice without a second query.
 - The third step walks from each followed user to the zap receipts naming them as `zapper`. That
-  role is produced by both the literal `#P/9735` tag and the derived `~p/9735 {via:"description"}`
+  role is produced by both the literal `P_9735` tag and the derived `ref_p_9735 {via:"description"}`
   edge (§5.3), so the step matches whichever the receipt carries.
 
 The Kotlin model and the JSON codec live in `:store/mapping/`. The codec rejects unknown keys:
@@ -588,15 +597,15 @@ a `count(*)` through the chain. The example above compiles to roughly this:
 
 ```cypher
 MATCH (me:User {pubkey: $me})
-CALL (me) { MATCH (me)<-[:`by/3`]-(l:Event:Stored) RETURN l ORDER BY l.created_at DESC LIMIT 1 }
-CALL (l)  { MATCH (l)-[:`#p/3`]->(f:User) RETURN f LIMIT $fanout }
+CALL (me) { MATCH (me)<-[:by_3]-(l:Event:Stored) RETURN l ORDER BY l.created_at DESC LIMIT 1 }
+CALL (l)  { MATCH (l)-[:p_3]->(f:User) RETURN f LIMIT $fanout }
 WITH collect(DISTINCT f) AS follows
 UNWIND follows AS f
-CALL (f)  { MATCH (f)<-[r:`~p/9735`|`#P/9735`]-(z:Event:Stored) WHERE 'zapper' IN r.roles
+CALL (f)  { MATCH (f)<-[r:ref_p_9735|P_9735]-(z:Event:Stored) WHERE 'zapper' IN r.roles
             RETURN z ORDER BY z.created_at DESC LIMIT $fanout }
 CALL (z)  { MATCH (z)-[r]->(n:Event:Stored) WHERE type(r) IN $zapTypes AND 'zap' IN r.roles
               AND n.kind = 1 AND n.created_at >= $since
-              AND EXISTS { (n)-[:`by/1`]->(a:User) WHERE a IN follows }
+              AND EXISTS { (n)-[:by_1]->(a:User) WHERE a IN follows }
             RETURN n }
 RETURN n, count(*) AS paths ORDER BY paths DESC, n.created_at DESC, n.id LIMIT 100
 ```
@@ -626,7 +635,9 @@ These are the queries the plan's parity and latency gates run. They double as do
 
 ---
 
-## 8. Store facade (`:store`)
+## 8. Store facade and query surfaces (`:store`)
+
+### 8.1 Facade
 
 ```kotlin
 object Neo4jEventStore {
@@ -646,7 +657,7 @@ object Neo4jEventStore {
 
 class Neo4jEventStore internal constructor(...) : IEventStore by store {
     val store: NostrSemanticsStore      // escape hatch, as in vespa-eventstore
-    val graph: GraphReads               // traverse / degree / edgesOf / explain — read-only
+    val graph: GraphReads               // traverse / degree / edgesOf / explain / cypher — read-only
     fun metrics(): …; fun backgroundStatus(): …
     suspend fun sweepOrphans(): Long
 }
@@ -664,8 +675,167 @@ write. This is the same reason vespa-relay sets `STORE_WRITERS`.
 are unit-tested with two `NostrSemanticsStore(InMemoryEventIndex())` instances with fault
 injection:
 
-- `StoreMirror(primary, replica)`
+- `StoreMirror(primary, replica, kindFilter)`
 - `MirrorReconciler(primary, replica)`
+
+### 8.2 The Cypher endpoint
+
+The traversal language (§7) stays: it is cheap, bounded by construction, cacheable, and the
+only shape that can later ride the Nostr wire. Cypher is the second, more powerful surface.
+Examples of what it adds:
+
+- "the 50 most-quoted articles of the week, grouped by author";
+- `shortestPath` between two pubkeys over `p_3`;
+- "hashtags whose usage doubled".
+
+`:store` owns the mechanism (`GraphReads.cypher`). vespa-relay owns the HTTP route and who may
+call it (plan R6).
+
+```kotlin
+suspend fun cypher(
+    query: String,
+    params: Map<String, Any?> = emptyMap(),
+    tier: CypherTier,                     // selects the CypherLimits below
+): CypherResult                           // columns, rows, truncated, elapsedMs, rejected?(reason)
+```
+
+#### 8.2.1 Why it needs its own guard, not just a read-only flag
+
+Neo4j **Community has no role-based access control.** The one account the store connects with
+can do anything: write, create users, call procedures, read files through `LOAD CSV`. Nothing
+on the server side distinguishes "the mirror writing" from "a stranger's query". Every
+protection therefore has to be layered in front of and around the query. Each layer below is
+tested against a hostile battery (§8.2.5), and no single layer is trusted alone.
+
+#### 8.2.2 Guard layers (`CypherGuard`)
+
+1. **Pre-flight `EXPLAIN`, then inspect the plan, not the text.**
+   - The statement is first run as `EXPLAIN <query>` in a read transaction, so nothing executes.
+   - It is rejected unless the summary's `queryType()` is `READ_ONLY`. That rejects `CREATE`,
+     `MERGE`, `SET`, `DELETE`, `CALL {…} IN TRANSACTIONS`, schema commands and admin commands.
+   - It is also rejected if any plan operator is `LoadCSV`, which blocks both local file reads
+     and SSRF through `http://` URLs.
+   - It is also rejected if any plan operator is a `ProcedureCall` / function call not on a
+     short allowlist (`db.labels`, `db.relationshipTypes`, `db.propertyKeys`, `db.schema.*`).
+   - It is also rejected if any plan operator is a `Show*` / `Terminate*` command.
+     `SHOW TRANSACTIONS` would reveal other callers' query text, and in Community every caller
+     is the same user.
+   - Inspecting the plan is robust to comments, casing and unicode tricks that defeat
+     text-matching.
+2. **Execute in a read transaction** (`AccessMode.READ` + `executeRead`), pinned to the data
+   database. This is belt and braces behind layer 1: a write that somehow planned as read-only
+   still fails at execution.
+3. **Server configuration**, applied by the relay's compose file and asserted by
+   `SchemaInstaller` at boot (it refuses to open if unsafe):
+   - `dbms.security.procedures.allowlist` is the same short list;
+   - no APOC / GDS plugins in the serving instance;
+   - `dbms.security.allow_csv_import_from_file_urls=false`, with no import directory;
+   - `db.transaction.timeout` is a server-side backstop for the client timeout;
+   - `db.memory.transaction.max` caps one query's heap;
+   - `db.memory.transaction.total.max` caps all queries together, *below* the heap the mirror's
+     writer needs. A runaway cartesian product fails with a memory error; it does not starve
+     ingest.
+4. **Bounded execution** (`CypherLimits`, per tier):
+   - a client transaction timeout;
+   - a row cap: the endpoint stops *pulling* after `maxRows` and cancels. It does not rewrite
+     the query with `LIMIT`, which changes semantics under `ORDER BY` / aggregation. The result
+     then says `truncated`.
+   - a response byte cap;
+   - a global concurrency semaphore, plus one in-flight query per caller;
+   - per-caller rate limits.
+5. **Load shedding for sync.** When the mirror lags (`graph.lagSeconds` above a threshold, §9),
+   the endpoint answers `503 graph busy` before touching Neo4j. Keeping the replica current
+   outranks ad-hoc queries.
+6. **Audit.** Every call is logged to the relay's audit directory: caller, a query hash, the
+   parameter *names*, elapsed time, rows, and the outcome or rejection reason. Hashing the text
+   plus logging on rejection is enough to reproduce abuse without storing every query verbatim.
+
+**Parameters:** `$params` are passed natively, and callers are expected to use them. There is no
+string interpolation anywhere in the path.
+
+#### 8.2.3 Results
+
+Rows are streamed as JSON (`{"columns": [...], "rows": [[...]], "truncated": false, "elapsedMs": n}`).
+Graph values serialize by label:
+
+- an `:Event:Stored` node is the **NIP-01 event JSON**. Under `BodyMode.SKELETON` it is hydrated
+  from Vespa by id, the same path as traversals.
+- a stub `:Event` is `{"id": …, "stored": false}`.
+- `:User` is `{"pubkey"}`, `:Address` is `{"address", "kind", "pubkey", "d"}`, and `:Tag` is
+  `{"name", "value"}`.
+- a relationship is `{"type", "start", "end", …properties}`.
+- a path is an alternating list.
+- scalars are native JSON. A 64-bit integer outside ±2^53 is a string.
+
+#### 8.2.4 What callers can see
+
+The endpoint sees **everything the store holds, ungated.** The relay's observer lens / trust
+floor (`LensRequiredPolicy`, the NIP-85 gate) is a REQ-path concept and does not apply. Every
+Cypher read is the equivalent of `include:spam`.
+
+That is acceptable for public notes. It is **not obviously acceptable for DM metadata.**
+
+- Kind-4 DMs carry sender + recipient in the clear.
+- Kind-1059 gift wraps carry the recipient `p`.
+- Bulk graph queries turn those into "who messages whom" graphs far more cheaply than paging
+  REQs.
+
+**Decision D3 (recommended): the relay's mirror does not replicate DM-metadata kinds** (4,
+1059, 21059 and any future sealed-DM wrapper) into Neo4j. The reconciler applies the same kind
+filter.
+
+- In the relay deployment, the Neo4j `IEventStore` is complete for everything except those
+  kinds. That is fine, because it does not serve REQs there (§1).
+- A standalone Neo4j store still stores them, and the parity gates still cover them.
+- The exclusion is `StoreMirror(kindFilter = …)` config, not schema, so an operator can
+  choose otherwise. This is Q7 in §13.
+
+#### 8.2.5 Hostile-query battery (`CypherGuardIT`)
+
+Every case must be **rejected before execution, or fail inside Neo4j without side effects**. The
+test asserts the database is byte-for-byte unchanged afterwards (node/relationship counts,
+`:Meta`, users).
+
+- Writes:
+  - `CREATE` / `MERGE` / `SET` / `REMOVE` / `DELETE` / `DETACH DELETE`;
+  - `FOREACH` writes;
+  - `CALL {…} IN TRANSACTIONS`.
+- Schema and admin commands:
+  - `CREATE INDEX` / `CONSTRAINT`;
+  - `CREATE USER`, `ALTER USER`, `SHOW USERS`;
+  - `SHOW TRANSACTIONS`, `TERMINATE TRANSACTIONS`;
+  - `STOP DATABASE`, `USE system …`.
+- Procedures and file access:
+  - `LOAD CSV FROM 'file:///etc/passwd'` and `LOAD CSV FROM 'http://169.254.169.254/…'`;
+  - `CALL dbms.*`, `CALL db.createLabel`;
+  - a procedure absent from the allowlist;
+  - `apoc.*` (absent).
+- Evasion attempts: comments, mixed case, unicode escapes, and a multi-statement payload.
+- Resource exhaustion:
+  - a cartesian product that exceeds `db.memory.transaction.max`;
+  - an unbounded variable-length path that hits the timeout;
+  - a row flood that hits the row and byte caps;
+  - N+1 concurrent calls that hit the semaphore;
+  - **all while the mirror keeps ingesting within its lag budget.**
+
+#### 8.2.6 The schema as a public contract
+
+Once strangers write Cypher against it, node labels, relationship type names, property names
+and role strings are API.
+
+- `docs/schema.md` is the reference. It contains every label, type family, property and role,
+  with example queries: T1–T12 written in Cypher.
+- `GET /graph/schema` serves the live view:
+  - `:Meta.schema_version`;
+  - labels and relationship types present, with counts;
+  - the role table;
+  - the kind registry.
+- **Versioning.** Additive changes bump the minor version, e.g. a new role, or a kind promoted
+  out of `_other`. A promotion is additive but visible: `p_other {kind: 1234}` edges become
+  `p_1234`, so queries on `_other` should also filter by `kind`. Renames and removals bump the
+  major version, are announced, and ship with a migration note.
+- `explain(traversal)` returns the Cypher a traversal compiles to. The traversal language
+  doubles as a way to learn the schema.
 
 ---
 
@@ -693,6 +863,8 @@ repaired by set reconciliation.** There are three mechanisms, in order of latenc
 
 1. **Live mirror (`StoreMirror`).** This is an `IEventStore` decorator installed in both
    processes, over the `VespaEventStore`.
+   - `kindFilter` drops the kinds D3 excludes (§8.2.4) before queueing; the reconciler applies
+     the same filter to both sides.
    - For every `insert` / `batchInsert` / `transaction` outcome that is `Accepted` in Vespa, the
      event is queued to a bounded in-memory queue. A single consumer `batchInsert`s it into
      Neo4j.
@@ -807,6 +979,7 @@ The testing model mirrors vespa-eventstore.
 | `./gradlew build` (unit) | Nothing: no Docker, no Neo4j | Deriver golden tests: one per appendix row, plus link rules, **including the nsec test**. Role table. `EventQuery`→Cypher and `Traversal`→Cypher compile snapshots. `NostrSemanticsStore` over `InMemoryGraphIndex`. `InMemoryGraphIndex` traversal semantics. Mirror/reconciler convergence under reordering, drops and crashes. `ModuleBoundariesTest`, `PortDecoratorsTest`. |
 | `spotlessCheck` | Nothing | ktlint plus the MIT header (`.spotless/copyright.kt`) |
 | `:benchmark:test -Pintegration` | Docker (testcontainers `neo4j:2026.09-community`, self-skips without Docker) | `Neo4jParityIT`: vespa-eventstore's `ParityCheck` battery vs Quartz SQLite. The harness is copied, because vespa's `:benchmark` is unpublished. `FilterMatrixIT` (NIP-01 part): `Filter.match` oracle. `TraversalParityIT`: T1–T12 in-memory vs Neo4j. `SchemaMigrationIT`: kind-registry migration. `StagingCorpusIT`: the captured staging export. |
+| `CypherGuardIT` (integration) | Docker | The hostile-query battery of §8.2.5: every case is rejected or fails without side effects, and the mirror keeps its lag budget meanwhile. `SchemaInstaller` refuses to open on an unsafe server config. |
 | vespa-relay `GraphMirrorIT` | Docker (Vespa + Neo4j) | Feed through `StoreMirror` with injected drops. After one reconcile, the id sets are equal, and a kind-5 / vanish / supersession applied only live converges. |
 
 CI (`.github/workflows/build.yml`) runs three jobs, `lint`, `build` and `integration`, as in
@@ -821,6 +994,7 @@ vespa-eventstore.
 | Q1 | D1: reuse `NostrSemanticsStore` via the `EventIndex` port, or fork the policy? | **Reuse.** Sync correctness rides on identical rules. |
 | Q2 | Body mode in the relay deployment | **`SKELETON`** and hydrate from Vespa. `FULL` for standalone use and gates. |
 | Q3 | Hosting at 212M events: the same box, a separate host, or a kind subset? | A separate host with enough RAM for the page cache. Revisit after the Phase 7 measurement. |
-| Q4 | How clients reach traversals: HTTP JSON only, or also on the Nostr wire? | **v1: `POST /graph`** (JSON, public, bounded) and `GET /graph/explain/{id}`. Nostr-wire exposure (a REQ extension, or a NIP-90 DVM) is a later, separate NIP-shaped decision. |
+| Q4 | How clients reach traversals: HTTP JSON only, or also on the Nostr wire? | **v1: `POST /graph`** (JSON, public, bounded), `POST /graph/cypher` (§8.2) and `GET /graph/explain/{id}`. Nostr-wire exposure (a REQ extension, or a NIP-90 DVM) is a later, separate NIP-shaped decision. |
 | Q5 | Maven group / package | `com.vitorpamplona.neo4j.eventstore`, or `com.nosfabrica.neo4j.eventstore` for symmetry with its sibling |
+| Q7 | Who may call `POST /graph/cypher`: admins, any NIP-98-authenticated pubkey, or anyone? And is DM metadata (kinds 4/1059/21059) excluded from the relay's graph (D3)? | **Start at `admin`** (NIP-98 against `RELAY_ADMIN_PUBKEYS`, the existing `AdminGate`). Widen to `auth` (any NIP-98 pubkey, per-pubkey limits) once `CypherGuardIT` and a week of admin use show the limits hold. `public` only with the tightest tier. **Exclude DM metadata: yes.** |
 | Q6 | Trust-aware traversals (observer lens, rank floor on reached users) | Later (plan Phase 8), by giving Neo4j a `ReputationIndex` so `TrustProjection` can decorate it too |
