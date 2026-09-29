@@ -3,13 +3,15 @@ kotlin = "2.4.0"
 # The published library version.
 app = "0.1.0"
 mavenPublish = "0.37.0"
-# Quartz (Amethyst's Nostr library) from JitPack, PINNED BY COMMIT. Bumps are deliberate:
-# the hint providers the graph is derived from, and EventFactory's known-kind set (which
-# names relationship types), move with it — docs/appendix-providers.md is re-run and the
-# derivation golden tests re-checked on every bump.
-# fcd76d2075 — amethyst main @ 2026-09-27; the same pin vespa-eventstore uses, so vespa-relay
-# resolves one Quartz for both libraries.
-quartz = "fcd76d2075"
+# Quartz (Amethyst's Nostr library) from JitPack, PINNED BY COMMIT. Bumps are deliberate: the
+# kind mappers (engine/kinds) read events through Quartz's classes, Tag parsers and accessors,
+# and EventFactory's class set is what KindMappersCoverageTest holds them to. A bump re-runs the
+# golden tests and the coverage test; a class Quartz adds needs its mapper in the same commit.
+# 6d9982c602 = amethyst main @ 2026-09-29, over fcd76d2075: carries amethyst #4267 (the
+# link-review fixes the mappers rely on) and the kinds added since (push notifications, video
+# views, concord timers). vespa-relay forces ONE Quartz for every module, so taking this
+# library there means forcing at least this commit.
+quartz = "6d9982c602"
 coroutines = "1.11.0"
 serialization = "1.11.0"
 # Apache-2.0. The ONLY Neo4j artifact this project links: the server (GPLv3) is always a

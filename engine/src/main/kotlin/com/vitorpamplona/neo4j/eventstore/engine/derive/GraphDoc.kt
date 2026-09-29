@@ -40,9 +40,10 @@ data class NodeRef(
 )
 
 /**
- * One relationship the event contributes. [props] values are only `String`, `Long` or
- * `List<String>` — the shapes Neo4j hands back — so the in-memory spec and the Neo4j binding
- * compare equal without conversion.
+ * One relationship the event contributes: [type] is the vocabulary relation's name. [props] are
+ * the link's typed props in store form plus its `via`; values are only `String`, `Long`,
+ * `Double`, `Boolean` or `List<String>` (the shapes Neo4j hands back), so the in-memory spec and
+ * the Neo4j binding compare equal without conversion.
  */
 data class EdgeDoc(
     val type: String,
@@ -51,27 +52,19 @@ data class EdgeDoc(
 )
 
 /**
- * The one slot a replaceable or addressable event competes for (NIP-01). The projector keeps at
- * most one stored event per slot and applies the tiebreak itself (spec §6.2), because the source
- * may supersede atomically and never report the loser's removal.
+ * The one slot a replaceable or addressable event competes for (NIP-01): its own address,
+ * `kind:pubkey:` for a replaceable kind and `kind:pubkey:d` for an addressable one, found
+ * through the `ADDRESS` edge every version has. The projector keeps at most one stored event per
+ * slot and applies the tiebreak itself (spec §6.2), because the source may supersede atomically
+ * and never report the loser's removal.
  */
-sealed interface Slot {
-    /** Kinds 0, 3, 10000–19999: one per (pubkey, kind), found through its `by_<k>` edge. */
-    data class Replaceable(
-        val pubkey: String,
-        val kind: Int,
-        val authorType: String,
-    ) : Slot
-
-    /** Kinds 30000–39999: one per address, found through `VERSION_OF`. */
-    data class Addressable(
-        val address: String,
-    ) : Slot
-}
+data class Slot(
+    val address: String,
+)
 
 /**
  * What one event projects to (spec §4–§5): the event node's properties, its slot, every
- * outgoing edge (authorship and `VERSION_OF` included), and — for kind 0 only — the curated
+ * outgoing edge (its `AUTHOR` and `ADDRESS` included), and — for kind 0 only — the curated
  * values it sets on its author.
  */
 data class GraphDoc(

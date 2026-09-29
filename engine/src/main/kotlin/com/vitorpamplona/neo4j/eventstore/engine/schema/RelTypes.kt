@@ -21,45 +21,12 @@
 package com.vitorpamplona.neo4j.eventstore.engine.schema
 
 /**
- * Relationship type names (spec §4.2) — plain Cypher identifiers, part of the public contract.
- *
- * The SOURCE KIND is in the type on purpose: Neo4j groups a dense node's relationships by type
- * and direction, so `(u)<-[:p_3]-()` walks follow lists only (not a hub's millions of mentions)
- * and `COUNT { (u)<-[:p_3]-() }` is O(1). Kinds outside the [KindRegistry] share an `_other`
- * type carrying a `kind` property, which bounds the type count against spam kinds.
- *
- * The three prefixes cannot collide: a literal tag is ONE letter then `_`; authorship is `by_`;
- * a derived reference is `ref_`. Case is significant (`e_1111` NIP-22 reply vs `E_1111` root).
+ * Relationship type names are the vocabulary's relation names (`vocab/Relation`): plain
+ * UPPER_SNAKE Cypher identifiers, part of the public contract (`docs/schema.md`). The source
+ * event's kind is a property of the source node, never part of the type: `PARENT` is a reply's
+ * parent whatever the reply's kind, and a query that cares filters on `kind`.
  */
 object RelTypes {
-    const val OTHER = "other"
-    const val VERSION_OF = "VERSION_OF"
-    const val OWNED_BY = "OWNED_BY"
-
-    const val AUTHOR_PREFIX = "by_"
-    const val DERIVED_PREFIX = "ref_"
-
-    /** Event → User authorship. */
-    fun authored(segment: String) = AUTHOR_PREFIX + segment
-
-    /** Event → target, from the literal single-letter tag [tagName]. */
-    fun literal(
-        tagName: String,
-        segment: String,
-    ): String {
-        require(tagName.length == 1 && tagName[0].isAsciiLetter()) { "not a single-letter tag: $tagName" }
-        return tagName + "_" + segment
-    }
-
-    /** Event → target, a link Quartz names that is NOT a literal single-letter tag. [family] is e, p or a. */
-    fun derived(
-        family: Char,
-        segment: String,
-    ): String {
-        require(family == 'e' || family == 'p' || family == 'a') { "not a reference family: $family" }
-        return DERIVED_PREFIX + family + "_" + segment
-    }
-
     private val SAFE = Regex("^[A-Za-z][A-Za-z0-9_]*$")
 
     /**
@@ -68,6 +35,4 @@ object RelTypes {
      * index), so every name is checked against this before it is spliced.
      */
     fun isSafe(type: String) = SAFE.matches(type)
-
-    private fun Char.isAsciiLetter() = this in 'a'..'z' || this in 'A'..'Z'
 }

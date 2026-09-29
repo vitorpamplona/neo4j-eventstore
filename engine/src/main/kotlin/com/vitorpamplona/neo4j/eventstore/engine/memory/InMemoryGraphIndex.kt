@@ -32,10 +32,9 @@ import com.vitorpamplona.neo4j.eventstore.engine.derive.Extractors
 import com.vitorpamplona.neo4j.eventstore.engine.derive.GraphDoc
 import com.vitorpamplona.neo4j.eventstore.engine.derive.NodeKind
 import com.vitorpamplona.neo4j.eventstore.engine.derive.NodeRef
-import com.vitorpamplona.neo4j.eventstore.engine.derive.Slot
 import com.vitorpamplona.neo4j.eventstore.engine.derive.wins
 import com.vitorpamplona.neo4j.eventstore.engine.schema.Labels
-import com.vitorpamplona.neo4j.eventstore.engine.schema.RelTypes
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
 import com.vitorpamplona.quartz.nip01Core.core.Event
 import com.vitorpamplona.quartz.nip01Core.store.IdAndTime
 import kotlinx.coroutines.sync.Mutex
@@ -64,8 +63,7 @@ class InMemoryGraphIndex(
     private val addresses = HashMap<String, AddressKey>()
     private val tagNodes = HashMap<String, Pair<String, String>>()
     private val incoming = HashMap<NodeRef, Int>()
-    private val replaceableSlots = HashMap<Pair<String, Int>, String>()
-    private val addressSlots = HashMap<String, String>()
+    private val slots = HashMap<String, String>() // slot address -> the held event in it
     private val removedAt = HashMap<String, Long>()
 
     override suspend fun apply(
@@ -89,12 +87,7 @@ class InMemoryGraphIndex(
             if (at != null && at >= nowSecs() - fenceSeconds) return ApplyOutcome(fenced = 1)
         }
         val doc = deriver.derive(event)
-        val incumbent =
-            when (val slot = doc.slot) {
-                is Slot.Replaceable -> replaceableSlots[slot.pubkey to slot.kind]
-                is Slot.Addressable -> addressSlots[slot.address]
-                null -> null
-            }?.let { held[it] }
+        val incumbent = doc.slot?.let { slots[it.address] }?.let { held[it] }
         if (incumbent != null) {
             if (!authoritative && wins(incumbent.createdAt, incumbent.id, doc.createdAt, doc.id)) return ApplyOutcome(stale = 1)
             unapplyHeld(incumbent)
@@ -107,11 +100,7 @@ class InMemoryGraphIndex(
     private fun write(doc: GraphDoc) {
         held[doc.id] = doc
         stubs.remove(doc.id)
-        when (val slot = doc.slot) {
-            is Slot.Replaceable -> replaceableSlots[slot.pubkey to slot.kind] = doc.id
-            is Slot.Addressable -> addressSlots[slot.address] = doc.id
-            null -> Unit
-        }
+        doc.slot?.let { slots[it.address] = doc.id }
         for (edge in doc.edges) {
             ensureNode(edge.target)
             incoming.merge(edge.target, 1, Int::plus)
@@ -141,7 +130,7 @@ class InMemoryGraphIndex(
                 if (ref.key !in addresses) {
                     val key = AddressKey.parse(ref.key) ?: AddressKey(ref.key, -1, "", "")
                     addresses[ref.key] = key
-                    // Every address points at its owner, stub or not (spec §4.2 OWNED_BY).
+                    // Every address points at its owner, stub or not: the one AUTHOR no event states.
                     if (key.pubkey.isNotEmpty()) {
                         val owner = NodeRef(NodeKind.USER, key.pubkey)
                         ensureNode(owner)
@@ -164,11 +153,7 @@ class InMemoryGraphIndex(
 
     private fun unapplyHeld(doc: GraphDoc) {
         held.remove(doc.id)
-        when (val slot = doc.slot) {
-            is Slot.Replaceable -> replaceableSlots.remove(slot.pubkey to slot.kind, doc.id)
-            is Slot.Addressable -> addressSlots.remove(slot.address, doc.id)
-            null -> Unit
-        }
+        doc.slot?.let { slots.remove(it.address, doc.id) }
         if (doc.authorProps != null) users[doc.pubkey]?.let { props -> Extractors.USER_FIELDS.forEach { props.remove(it) } }
         // The node survives as a stub while anything still points at it.
         val self = NodeRef(NodeKind.EVENT, doc.id)
@@ -250,7 +235,7 @@ class InMemoryGraphIndex(
                 for (e in doc.edges) edges += EdgeRow(Labels.EVENT, doc.id, e.type, e.target.kind.label, e.target.key, e.props)
             }
             for ((id, key) in addresses) {
-                if (key.pubkey.isNotEmpty()) edges += EdgeRow(Labels.ADDRESS, id, RelTypes.OWNED_BY, Labels.USER, key.pubkey, emptyMap())
+                if (key.pubkey.isNotEmpty()) edges += EdgeRow(Labels.ADDRESS, id, Relation.AUTHOR.name, Labels.USER, key.pubkey, emptyMap())
             }
             GraphDump(nodes, edges)
         }

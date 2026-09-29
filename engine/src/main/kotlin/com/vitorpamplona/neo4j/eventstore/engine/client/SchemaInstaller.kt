@@ -21,7 +21,6 @@
 package com.vitorpamplona.neo4j.eventstore.engine.client
 
 import com.vitorpamplona.neo4j.eventstore.engine.schema.GraphPolicy
-import com.vitorpamplona.neo4j.eventstore.engine.schema.KindRegistry
 import com.vitorpamplona.neo4j.eventstore.engine.schema.Labels
 import org.neo4j.driver.Driver
 import org.neo4j.driver.SessionConfig
@@ -39,7 +38,6 @@ class SchemaInstaller(
     private val database: String = DEFAULT_DATABASE,
 ) {
     fun install(
-        registry: KindRegistry,
         policy: GraphPolicy,
         awaitSeconds: Long = 600,
     ) {
@@ -49,8 +47,8 @@ class SchemaInstaller(
             session
                 .run(
                     "MERGE (m:${Labels.META} {singleton: true}) " +
-                        "SET m.schema_version = \$schema, m.kind_registry_version = \$registry, m.policy_hash = \$policy",
-                    mapOf("schema" to SCHEMA_VERSION, "registry" to registry.version, "policy" to policy.hash()),
+                        "SET m.schema_version = \$schema, m.policy_hash = \$policy REMOVE m.kind_registry_version",
+                    mapOf("schema" to SCHEMA_VERSION, "policy" to policy.hash()),
                 ).consume()
         }
     }
@@ -69,8 +67,12 @@ class SchemaInstaller(
     companion object {
         const val DEFAULT_DATABASE = "neo4j"
 
-        /** The public schema version (spec §8.6): minor for additive changes, major for renames/removals. */
-        const val SCHEMA_VERSION = "1.1"
+        /**
+         * The public schema version (spec §8.6): minor for additive changes, major for renames and
+         * removals. 2.0: relationship types are the vocabulary's relations (`REPLY`-style names,
+         * `docs/vocabulary.md`), no longer `<tag>_<kind>`.
+         */
+        const val SCHEMA_VERSION = "2.0"
 
         val STATEMENTS =
             listOf(
@@ -85,13 +87,13 @@ class SchemaInstaller(
                 "CREATE INDEX stored_expires_at IF NOT EXISTS FOR (n:${Labels.STORED}) ON (n.expires_at)",
                 "CREATE INDEX user_nip05 IF NOT EXISTS FOR (n:${Labels.USER}) ON (n.nip05)",
                 "CREATE INDEX removed_at IF NOT EXISTS FOR (n:${Labels.REMOVED}) ON (n.at)",
-                // Report queries filter the report edges themselves ("user-wide impersonation
-                // reports", "everything but the invented types"): relationship indexes let a
-                // query that is not anchored on one user seek instead of scanning every report.
-                "CREATE INDEX report_p_scope_type IF NOT EXISTS FOR ()-[r:p_1984]-() ON (r.scope, r.report)",
-                "CREATE INDEX report_p_raw IF NOT EXISTS FOR ()-[r:p_1984]-() ON (r.report_raw)",
-                "CREATE INDEX report_e_type IF NOT EXISTS FOR ()-[r:e_1984]-() ON (r.report)",
-                "CREATE INDEX report_a_type IF NOT EXISTS FOR ()-[r:a_1984]-() ON (r.report)",
+                // Report queries filter the report edges themselves ("impersonation reports",
+                // "everything but the invented types"): relationship indexes let a query that is
+                // not anchored on one user seek instead of scanning every report.
+                "CREATE INDEX reported_user_type IF NOT EXISTS FOR ()-[r:REPORTED_USER]-() ON (r.report)",
+                "CREATE INDEX reported_user_raw IF NOT EXISTS FOR ()-[r:REPORTED_USER]-() ON (r.report_raw)",
+                "CREATE INDEX reported_author_type IF NOT EXISTS FOR ()-[r:REPORTED_AUTHOR]-() ON (r.report)",
+                "CREATE INDEX reported_type IF NOT EXISTS FOR ()-[r:REPORTED]-() ON (r.report)",
             )
     }
 }

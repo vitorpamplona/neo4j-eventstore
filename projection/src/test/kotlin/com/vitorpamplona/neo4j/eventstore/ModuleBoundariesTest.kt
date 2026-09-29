@@ -34,15 +34,18 @@ import kotlin.test.fail
 class ModuleBoundariesTest {
     private val base = "com.vitorpamplona.neo4j.eventstore"
 
-    /** `:engine`: the vocabulary, the pure derivation, the port, its decorators, its implementations. */
+    /** `:engine`: keys and names, the vocabulary, the kind mappers, the pure derivation, the port, its decorators, its implementations. */
     private val engineLayer =
         mapOf(
             "engine.schema" to 0,
-            "engine.derive" to 1,
-            "engine" to 2,
-            "engine.metrics" to 3,
-            "engine.memory" to 4,
-            "engine.client" to 4,
+            "engine.vocab.props" to 1,
+            "engine.vocab" to 2,
+            "engine.kinds" to 3,
+            "engine.derive" to 4,
+            "engine" to 5,
+            "engine.metrics" to 6,
+            "engine.memory" to 7,
+            "engine.client" to 7,
         )
 
     /** `:projection`: reconcile and cypher stand alone, the feed uses reconcile's dirty tracker, the facade composes all. */

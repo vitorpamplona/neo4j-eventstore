@@ -39,7 +39,7 @@ object Labels {
     const val ADDRESS = "Address"
     const val TAG = "Tag"
 
-    /** Singleton bookkeeping node: schema version, kind-registry version, policy hash. */
+    /** Singleton bookkeeping node: schema version, policy hash. */
     const val META = "Meta"
 
     /**

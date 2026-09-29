@@ -31,11 +31,11 @@ import com.vitorpamplona.neo4j.eventstore.engine.derive.EdgeDeriver
 import com.vitorpamplona.neo4j.eventstore.engine.derive.Extractors
 import com.vitorpamplona.neo4j.eventstore.engine.derive.GraphDoc
 import com.vitorpamplona.neo4j.eventstore.engine.derive.NodeKind
-import com.vitorpamplona.neo4j.eventstore.engine.derive.Slot
 import com.vitorpamplona.neo4j.eventstore.engine.derive.wins
 import com.vitorpamplona.neo4j.eventstore.engine.memory.InMemoryGraphIndex
 import com.vitorpamplona.neo4j.eventstore.engine.schema.Labels
 import com.vitorpamplona.neo4j.eventstore.engine.schema.RelTypes
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
 import com.vitorpamplona.quartz.nip01Core.core.Event
 import com.vitorpamplona.quartz.nip01Core.store.IdAndTime
 import kotlinx.coroutines.Dispatchers
@@ -169,53 +169,29 @@ class Neo4jGraphIndex(
         tx: TransactionContext,
         doc: GraphDoc,
     ): Pair<String, Long>? =
-        when (val slot = doc.slot) {
-            is Slot.Replaceable -> {
-                val type = safe(slot.authorType)
-                tx
-                    .run(
-                        """
-                        MERGE (u:${Labels.USER} {${Labels.USER_KEY}: ${'$'}pk})
-                        SET u.__lock = true REMOVE u.__lock
-                        WITH u
-                        OPTIONAL MATCH (u)<-[:$type]-(old:${Labels.STORED})
-                        WHERE old.kind = ${'$'}kind AND old.${Labels.EVENT_KEY} <> ${'$'}id
-                        RETURN old.${Labels.EVENT_KEY} AS id, old.created_at AS createdAt
-                        """.trimIndent(),
-                        mapOf("pk" to slot.pubkey, "kind" to slot.kind.toLong(), "id" to doc.id),
-                    ).list()
-                    .firstOrNull { !it["id"].isNull }
-                    ?.let { it["id"].asString() to it["createdAt"].asLong() }
-            }
-
-            is Slot.Addressable -> {
-                val key = AddressKey.parse(slot.address)
-                tx
-                    .run(
-                        """
-                        MERGE (a:${Labels.ADDRESS} {${Labels.ADDRESS_KEY}: ${'$'}address})
-                        ON CREATE SET a.kind = ${'$'}kind, a.pubkey = ${'$'}pubkey, a.d = ${'$'}d
-                        SET a.__lock = true REMOVE a.__lock
-                        WITH a
-                        OPTIONAL MATCH (a)<-[:${RelTypes.VERSION_OF}]-(old:${Labels.STORED})
-                        WHERE old.${Labels.EVENT_KEY} <> ${'$'}id
-                        RETURN old.${Labels.EVENT_KEY} AS id, old.created_at AS createdAt
-                        """.trimIndent(),
-                        mapOf(
-                            "address" to slot.address,
-                            "kind" to (key?.kind ?: -1).toLong(),
-                            "pubkey" to (key?.pubkey ?: ""),
-                            "d" to (key?.d ?: ""),
-                            "id" to doc.id,
-                        ),
-                    ).list()
-                    .firstOrNull { !it["id"].isNull }
-                    ?.let { it["id"].asString() to it["createdAt"].asLong() }
-            }
-
-            null -> {
-                null
-            }
+        doc.slot?.let { slot ->
+            val key = AddressKey.parse(slot.address)
+            tx
+                .run(
+                    """
+                    MERGE (a:${Labels.ADDRESS} {${Labels.ADDRESS_KEY}: ${'$'}address})
+                    ON CREATE SET a.kind = ${'$'}kind, a.pubkey = ${'$'}pubkey, a.d = ${'$'}d
+                    SET a.__lock = true REMOVE a.__lock
+                    WITH a
+                    OPTIONAL MATCH (a)<-[:$ADDRESS]-(old:${Labels.STORED})
+                    WHERE old.${Labels.EVENT_KEY} <> ${'$'}id
+                    RETURN old.${Labels.EVENT_KEY} AS id, old.created_at AS createdAt
+                    """.trimIndent(),
+                    mapOf(
+                        "address" to slot.address,
+                        "kind" to (key?.kind ?: -1).toLong(),
+                        "pubkey" to (key?.pubkey ?: ""),
+                        "d" to (key?.d ?: ""),
+                        "id" to doc.id,
+                    ),
+                ).list()
+                .firstOrNull { !it["id"].isNull }
+                ?.let { it["id"].asString() to it["createdAt"].asLong() }
         }
 
     // A skipped apply may have just MERGEd its slot anchor into existence; leave no orphan.
@@ -223,11 +199,7 @@ class Neo4jGraphIndex(
         tx: TransactionContext,
         doc: GraphDoc,
     ) {
-        when (val slot = doc.slot) {
-            is Slot.Replaceable -> dropIfOrphan(tx, NodeKind.USER, slot.pubkey)
-            is Slot.Addressable -> dropAddressIfOrphan(tx, slot.address)?.let { dropIfOrphan(tx, NodeKind.USER, it) }
-            null -> Unit
-        }
+        doc.slot?.let { slot -> dropAddressIfOrphan(tx, slot.address)?.let { dropIfOrphan(tx, NodeKind.USER, it) } }
     }
 
     /**
@@ -301,7 +273,7 @@ class Neo4jGraphIndex(
             if (kind == NodeKind.ADDRESS) {
                 cypher.append(
                     "WITH t, row WHERE row.pubkey <> '' " +
-                        "MERGE (o:${Labels.USER} {${Labels.USER_KEY}: row.pubkey}) MERGE (t)-[:${RelTypes.OWNED_BY}]->(o) ",
+                        "MERGE (o:${Labels.USER} {${Labels.USER_KEY}: row.pubkey}) MERGE (t)-[:$AUTHOR]->(o) ",
                 )
             }
             cypher.append("} ")
@@ -375,10 +347,11 @@ class Neo4jGraphIndex(
             // it — so fall back to whichever kind 0 is still held (its node keeps the names too).
             tx
                 .run(
-                    "MATCH (e:${Labels.EVENT} {${Labels.EVENT_KEY}: \$id})-[b]->(u:${Labels.USER}) " +
-                        "WHERE type(b) STARTS WITH '${RelTypes.AUTHOR_PREFIX}' " +
+                    "MATCH (e:${Labels.EVENT} {${Labels.EVENT_KEY}: \$id})-[:$AUTHOR]->(u:${Labels.USER}) " +
                         Extractors.USER_FIELDS.joinToString(" ") { "SET u.$it = null" } +
-                        " WITH u OPTIONAL MATCH (u)<-[:${RelTypes.authored("0")}]-(k:${Labels.STORED}) " +
+                        // Through the `0:<pubkey>:` address every kind 0 has: one hop to the
+                        // author's kind 0s, not a walk over everything they ever signed.
+                        " WITH e, u OPTIONAL MATCH (e)-[:$ADDRESS]->(:${Labels.ADDRESS})<-[:$ADDRESS]-(k:${Labels.STORED}) " +
                         "WHERE k.${Labels.EVENT_KEY} <> \$id " +
                         "WITH u, k ORDER BY k.created_at DESC, k.${Labels.EVENT_KEY} ASC LIMIT 1 " +
                         "WITH u, k WHERE k IS NOT NULL " +
@@ -407,7 +380,7 @@ class Neo4jGraphIndex(
                 .map { primaryKind(it["labels"].asList { v -> v.asString() }) to it["key"].asString() }
                 .filter { it !in keep }
 
-        // Non-users first (an address takes its OWNED_BY with it), then users, so each check
+        // Non-users first (an address takes its AUTHOR edge with it), then users, so each check
         // runs after every edge that could have kept it alive is gone.
         val byKind = targets.groupBy({ it.first }, { it.second })
         byKind[NodeKind.EVENT]?.let { dropOrphans(tx, NodeKind.EVENT, it) }
@@ -458,7 +431,7 @@ class Neo4jGraphIndex(
             ).consume()
     }
 
-    /** Address [dropOrphans]: takes each dropped address's OWNED_BY with it and returns the owners to re-check. */
+    /** Address [dropOrphans]: takes each dropped address's AUTHOR edge with it and returns the owners to re-check. */
     private fun dropAddressOrphans(
         tx: TransactionContext,
         addresses: Collection<String>,
@@ -467,7 +440,7 @@ class Neo4jGraphIndex(
             .run(
                 "UNWIND \$keys AS key MATCH (t:${Labels.ADDRESS} {${Labels.ADDRESS_KEY}: key}) " +
                     "SET t.__lock = true REMOVE t.__lock WITH t WHERE NOT EXISTS { (t)<--() } " +
-                    "WITH t, [(t)-[:${RelTypes.OWNED_BY}]->(o:${Labels.USER}) | o.${Labels.USER_KEY}] AS owners " +
+                    "WITH t, [(t)-[:$AUTHOR]->(o:${Labels.USER}) | o.${Labels.USER_KEY}] AS owners " +
                     "DETACH DELETE t UNWIND owners AS owner RETURN DISTINCT owner",
                 mapOf("keys" to addresses.sorted()),
             ).list { it["owner"].asString() }
@@ -616,6 +589,9 @@ class Neo4jGraphIndex(
     override fun close() = Unit
 
     companion object {
+        private val AUTHOR = safe(Relation.AUTHOR.name)
+        private val ADDRESS = safe(Relation.ADDRESS.name)
+
         private fun safe(type: String): String {
             require(RelTypes.isSafe(type)) { "unsafe relationship type $type" }
             return type

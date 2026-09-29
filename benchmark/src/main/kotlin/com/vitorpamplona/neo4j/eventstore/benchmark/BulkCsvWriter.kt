@@ -26,6 +26,8 @@ import com.vitorpamplona.neo4j.eventstore.engine.derive.Extractors
 import com.vitorpamplona.neo4j.eventstore.engine.derive.NodeKind
 import com.vitorpamplona.neo4j.eventstore.engine.schema.Labels
 import com.vitorpamplona.neo4j.eventstore.engine.schema.RelTypes
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.PropType
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.PropsColumns
 import com.vitorpamplona.quartz.nip01Core.core.Event
 import java.io.BufferedWriter
 import java.io.File
@@ -38,7 +40,7 @@ import java.io.File
  * STREAMING, no in-memory dedup (500M events will not fit): every node is written wherever it
  * is seen and `--skip-duplicate-nodes` keeps the FIRST occurrence, so files are ordered for
  * that — held events before stubs, users with kind-0 names before bare references. What the
- * importer cannot do is left to [BulkImport.finalize] (OWNED_BY) and to the reconciler
+ * importer cannot do is left to [BulkImport.finalize] (each address's AUTHOR) and to the reconciler
  * (a dump spans time, so an old and a new version of one slot may both be present; the
  * reconciler's authoritative pass removes the loser as an "extra").
  */
@@ -140,31 +142,23 @@ class BulkCsvWriter(
                     NodeKind.ADDRESS -> RELS_ADDRESS
                     NodeKind.TAG -> RELS_TAG
                 }
-            val space = edge.target.kind.label
             require(RelTypes.isSafe(edge.type))
-            out(
-                file,
-                ":START_ID(Event),:END_ID($space),:TYPE,roles:string[],via,kind:long,report,report_raw,scope,rank:long,followers:long",
-            ).apply {
+            out(file, RELS_HEADER.format(edge.target.kind.label)).apply {
                 val p = edge.props
-
-                @Suppress("UNCHECKED_CAST")
-                val roles = (p["roles"] as List<String>?)?.joinToString(";")
-                write(
-                    listOf(
-                        q(doc.id),
-                        q(key),
-                        edge.type,
-                        q(roles),
-                        q(p["via"] as String?),
-                        n(p["kind"]),
-                        q(p[Extractors.REPORT] as String?),
-                        q(p[Extractors.REPORT_RAW] as String?),
-                        q(p[Extractors.SCOPE] as String?),
-                        n(p[Extractors.RANK]),
-                        n(p[Extractors.FOLLOWERS]),
-                    ).joinToString(","),
-                )
+                val cells = ArrayList<String>(3 + EDGE_COLUMNS.size)
+                cells += q(doc.id)
+                cells += q(key)
+                cells += edge.type
+                for ((name, type) in EDGE_COLUMNS) {
+                    val value = p[name]
+                    cells +=
+                        when (type) {
+                            PropType.STRING -> q(value as String?)
+                            PropType.STRING_LIST -> q((value as List<*>?)?.joinToString(ARRAY_DELIMITER))
+                            else -> n(value)
+                        }
+                }
+                write(cells.joinToString(","))
                 newLine()
             }
         }
@@ -202,6 +196,19 @@ class BulkCsvWriter(
         const val RELS_USER = "rels_user.csv"
         const val RELS_ADDRESS = "rels_address.csv"
         const val RELS_TAG = "rels_tag.csv"
+
+        /**
+         * Every edge property column: `via`, then every props key ([PropsColumns]). A string-list
+         * value joins with [ARRAY_DELIMITER], the importer's default array delimiter, so a list
+         * element containing it would split: roles, labels and poll responses never do.
+         */
+        private val EDGE_COLUMNS: List<Pair<String, PropType>> =
+            listOf(EdgeDeriver.VIA to PropType.STRING) + PropsColumns.TYPES.map { it.key to it.value }
+
+        private const val ARRAY_DELIMITER = ";"
+
+        private val RELS_HEADER =
+            ":START_ID(Event),:END_ID(%s),:TYPE," + EDGE_COLUMNS.joinToString(",") { (name, type) -> "$name:${type.csv}" }
 
         // Files without a `:LABEL` column get their label on the command line (events carry
         // theirs per row: held ones are Event;Stored, stubs just Event).

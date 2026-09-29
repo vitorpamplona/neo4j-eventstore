@@ -22,9 +22,8 @@ package com.vitorpamplona.neo4j.eventstore.benchmark
 
 import com.vitorpamplona.neo4j.eventstore.engine.client.SchemaInstaller
 import com.vitorpamplona.neo4j.eventstore.engine.schema.GraphPolicy
-import com.vitorpamplona.neo4j.eventstore.engine.schema.KindRegistry
 import com.vitorpamplona.neo4j.eventstore.engine.schema.Labels
-import com.vitorpamplona.neo4j.eventstore.engine.schema.RelTypes
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
 import org.neo4j.driver.Driver
 
 /** The steps after `neo4j-admin database import` (spec §7.3 step 3). */
@@ -36,18 +35,17 @@ object BulkImport {
      */
     fun finalize(
         driver: Driver,
-        registry: KindRegistry = KindRegistry.quartzKnownKinds(),
         policy: GraphPolicy = GraphPolicy.Default,
         awaitIndexesSeconds: Long = 24 * 3600L,
     ) {
         // Populating the indexes over a freshly imported graph takes as long as the graph is big —
         // hours at production scale — so wait for them as long as it takes.
-        SchemaInstaller(driver).install(registry, policy, awaitSeconds = awaitIndexesSeconds)
+        SchemaInstaller(driver).install(policy, awaitSeconds = awaitIndexesSeconds)
         driver.session().use { session ->
             session
                 .run(
-                    "MATCH (a:${Labels.ADDRESS}) WHERE a.pubkey <> '' AND NOT EXISTS { (a)-[:${RelTypes.OWNED_BY}]->() } " +
-                        "CALL (a) { MERGE (u:${Labels.USER} {${Labels.USER_KEY}: a.pubkey}) MERGE (a)-[:${RelTypes.OWNED_BY}]->(u) } " +
+                    "MATCH (a:${Labels.ADDRESS}) WHERE a.pubkey <> '' AND NOT EXISTS { (a)-[:${Relation.AUTHOR.name}]->() } " +
+                        "CALL (a) { MERGE (u:${Labels.USER} {${Labels.USER_KEY}: a.pubkey}) MERGE (a)-[:${Relation.AUTHOR.name}]->(u) } " +
                         "IN TRANSACTIONS OF 10000 ROWS",
                 ).consume()
         }

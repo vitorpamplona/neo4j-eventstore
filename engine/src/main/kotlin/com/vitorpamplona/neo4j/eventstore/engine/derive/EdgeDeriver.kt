@@ -20,16 +20,13 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.derive
 
+import com.vitorpamplona.neo4j.eventstore.engine.kinds.KindLinks
 import com.vitorpamplona.neo4j.eventstore.engine.schema.GraphPolicy
-import com.vitorpamplona.neo4j.eventstore.engine.schema.KindRegistry
-import com.vitorpamplona.neo4j.eventstore.engine.schema.RelTypes
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
 import com.vitorpamplona.quartz.nip01Core.core.Event
 import com.vitorpamplona.quartz.nip01Core.core.isAddressable
-import com.vitorpamplona.quartz.nip01Core.core.isReplaceable
-import com.vitorpamplona.quartz.nip01Core.hints.AddressHintProvider
-import com.vitorpamplona.quartz.nip01Core.hints.EventHintProvider
-import com.vitorpamplona.quartz.nip01Core.hints.PubKeyHintProvider
-import com.vitorpamplona.quartz.nip01Core.tags.isIndexableTagName
 import com.vitorpamplona.quartz.utils.EventFactory
 
 /**
@@ -38,235 +35,103 @@ import com.vitorpamplona.quartz.utils.EventFactory
  * The live projector, the in-memory executable spec and the bulk CSV writer all call this, so
  * they can disagree about how a graph is STORED but never about what it IS.
  *
- * The three steps:
- * 1. Ask Quartz's hint providers which ids the event links ([EventHintProvider],
- *    [PubKeyHintProvider], [AddressHintProvider]) — they know kind semantics a value's shape
- *    cannot reveal (a `z` parent list, NIP-22 `E`/`A`/`P`, NIP-58 badge tags).
- * 2. Walk every single-letter tag and give it ONE home: a provider-named target, a NIP-85
- *    subject, a shape-based fallback for kinds Quartz does not type, a `:Tag` node if the policy
- *    allowlists the name, or nothing.
- * 3. Every provider-named id no literal tag produced becomes a DERIVED edge (`ref_…`, with
- *    `via`), plus the [LinkRules] that fill gaps Quartz leaves open.
+ * What an event's references MEAN is the vocabulary's job ([KindLinks]: every link the event
+ * states, typed by relation, `docs/vocabulary.md`). This turns links into edges — the relation's
+ * name is the relationship type, its props and `via` are the edge's properties — and applies the
+ * rules that are about STORAGE, not meaning: the nsec rule ([Secrets]), the `:Tag` value bound
+ * ([GraphPolicy.maxTagValueBytes]), no edge from an event to itself, the NIP-01 slot, and the
+ * curated node values ([Extractors]).
  */
 class EdgeDeriver(
-    val registry: KindRegistry = KindRegistry.quartzKnownKinds(),
     val policy: GraphPolicy = GraphPolicy.Default,
 ) {
     fun derive(input: Event): GraphDoc {
         val event = typed(input)
-        val kind = event.kind
-        val segment = registry.segment(kind)
-        val bucketed = segment == RelTypes.OTHER
-        val tags = event.tags
-        val out = EdgeCollector()
+        val secrets = Secrets.inContent(event.content)
 
-        // Step 1 — what Quartz says this kind links, validated to canonical keys.
-        val secrets = LinkRules.contentSecrets(event.content)
-        val report = if (kind == 1984) Extractors.ReportFacts.of(event) else null
-        // Rule 4 reads the FIRST `d` only, as Quartz's aboutUser() does; a second `d` asserts nothing.
-        val firstD = tags.indexOfFirst { it.size >= 2 && it[0] == "d" }
-        val linkedEvents = providerSet { (event as? EventHintProvider)?.linkedEventIds() }.filterCanonicalHex() - event.id
-        val linkedUsers = providerSet { (event as? PubKeyHintProvider)?.linkedPubKeys() }.filterCanonicalHex() - secrets
-        val linkedAddresses =
-            providerSet { (event as? AddressHintProvider)?.linkedAddressIds() }.mapNotNullTo(
-                HashSet(),
-            ) { canonicalAddress(it) }
-
-        // Step 2 — every single-letter tag gets exactly one home (or is dropped).
-        val literalEvents = HashSet<String>()
-        val literalUsers = HashSet<String>()
-        val literalAddresses = HashSet<String>()
-        val literalUppercaseP = HashSet<String>()
-        val roles = RoleTable.Context(kind, tags)
-
-        tags.forEachIndexed { index, tag ->
-            if (tag.size < 2) return@forEachIndexed
-            val name = tag[0]
-            if (!isIndexableTagName(name)) return@forEachIndexed
-            val value = tag[1]
-            // A key the content reveals as a PRIVATE key never becomes a node, from any tag — nor
-            // does a value carrying a bech32 one (`["t","nsec1…"]`, a URL with `?k=nsec1…`).
-            if (value in secrets || LinkRules.carriesNsec(value)) return@forEachIndexed
-            val target =
-                if (name == "d" && index != firstD) {
-                    null
-                } else {
-                    classify(kind, name, value, linkedEvents, linkedUsers, linkedAddresses)
-                }
-            val type = RelTypes.literal(name, segment)
-            if (target != null) {
-                if (target.kind == NodeKind.EVENT && target.key == event.id) return@forEachIndexed
-                when (target.kind) {
-                    NodeKind.EVENT -> literalEvents += target.key
-                    NodeKind.USER -> literalUsers += target.key
-                    NodeKind.ADDRESS -> literalAddresses += target.key
-                    NodeKind.TAG -> Unit
-                }
-                if (name == "P") literalUppercaseP += target.key
-                val props = HashMap<String, Any>()
-                RoleTable.storedRoles(roles, index, tag)?.let { props[ROLES] = it }
-                if (bucketed) props[KIND] = kind.toLong()
-                Extractors.edgeValues(event, name, tag, target, policy, report)?.let { props.putAll(it) }
-                out.add(EdgeDoc(type, target, props))
-            } else if (policy.isTagNode(name, value)) {
-                out.add(EdgeDoc(type, NodeRef(NodeKind.TAG, "$name:$value"), if (bucketed) mapOf(KIND to kind.toLong()) else emptyMap()))
-            }
+        val edges = ArrayList<EdgeDoc>()
+        for (link in KindLinks.of(event)) {
+            val target = nodeRef(link.target) ?: continue
+            if (target.kind == NodeKind.EVENT && target.key == event.id) continue
+            // The ADDRESS edge is the event's own slot: its key is the event's pubkey and `d`,
+            // never a pasted secret, and the slot must exist for supersession to work.
+            if (link.relation != Relation.ADDRESS && Secrets.leaks(target.key, secrets)) continue
+            val props = storeProps(link, secrets) ?: continue
+            edges.add(EdgeDoc(link.relation.name, target, props))
         }
-
-        // Step 3 — derived references: named by a provider, produced by no literal tag.
-        val vias = LinkRules.multiLetterVias(tags)
-        for (id in linkedEvents) {
-            if (id !in
-                literalEvents
-            ) {
-                out.add(derived('e', segment, bucketed, kind, NodeRef(NodeKind.EVENT, id), vias[id]))
-            }
-        }
-        for (pk in linkedUsers) {
-            if (pk !in
-                literalUsers
-            ) {
-                out.add(derived('p', segment, bucketed, kind, NodeRef(NodeKind.USER, pk), vias[pk]))
-            }
-        }
-        for (a in linkedAddresses) {
-            if (a !in
-                literalAddresses
-            ) {
-                out.add(derived('a', segment, bucketed, kind, NodeRef(NodeKind.ADDRESS, a), vias[a]))
-            }
-        }
-
-        LinkRules.extraLinks(event, literalEvents, literalUsers, literalUppercaseP, secrets).forEach { link ->
-            val props = HashMap<String, Any>()
-            props[VIA] = link.via
-            link.roles?.let { props[ROLES] = it }
-            if (bucketed) props[KIND] = kind.toLong()
-            out.add(EdgeDoc(RelTypes.derived(link.family, segment), link.target, props))
-        }
-
-        // Authorship, and the event's own slot.
-        val authorType = RelTypes.authored(segment)
-        out.add(EdgeDoc(authorType, NodeRef(NodeKind.USER, event.pubKey), if (bucketed) mapOf(KIND to kind.toLong()) else emptyMap()))
 
         val nodeProps = HashMap<String, Any>()
-        val slot: Slot? =
-            when {
-                kind.isAddressable() -> {
-                    val d = boundedD(tags.firstOrNull { it.size >= 2 && it[0] == "d" }?.get(1) ?: "")
-                    nodeProps[D] = d
-                    val address = assembleAddress(kind, event.pubKey, d)
-                    out.add(EdgeDoc(RelTypes.VERSION_OF, NodeRef(NodeKind.ADDRESS, address)))
-                    Slot.Addressable(address)
-                }
-
-                kind.isReplaceable() -> {
-                    Slot.Replaceable(event.pubKey, kind, authorType)
-                }
-
-                else -> {
-                    null
-                }
-            }
-        expiration(tags)?.let { nodeProps[EXPIRES_AT] = it }
+        // The slot is the ADDRESS link the vocabulary emitted, so it is validated exactly as the
+        // edge is: an event whose own address is malformed (a non-hex pubkey) competes for none.
+        val slot = edges.firstOrNull { it.type == Relation.ADDRESS.name }?.let { Slot(it.target.key) }
+        if (slot != null && event.kind.isAddressable()) {
+            AddressKey.parse(slot.address)?.let { nodeProps[D] = it.d }
+        }
+        expiration(event.tags)?.let { nodeProps[EXPIRES_AT] = it }
         nodeProps.putAll(Extractors.nodeValues(event, policy))
 
         return GraphDoc(
             id = event.id,
-            kind = kind,
+            kind = event.kind,
             createdAt = event.createdAt,
             pubkey = event.pubKey,
             nodeProps = nodeProps,
             slot = slot,
-            // Last line of the nsec rule: whatever path a revealed private key took (a provider
-            // set, a derived link, an address's pubkey part), no edge may point at it.
-            edges =
-                if (secrets.isEmpty()) {
-                    out.edges()
-                } else {
-                    out.edges().filter { e ->
-                        e.type == RelTypes.VERSION_OF ||
-                            secrets.none { e.target.key.contains(it) }
-                    }
-                },
+            edges = edges,
             authorProps = Extractors.authorValues(event, policy),
         )
     }
 
-    private fun classify(
-        kind: Int,
-        name: String,
-        value: String,
-        linkedEvents: Set<String>,
-        linkedUsers: Set<String>,
-        linkedAddresses: Set<String>,
-    ): NodeRef? {
-        // Rules 1–3: the providers name it.
-        if (value in linkedEvents) return NodeRef(NodeKind.EVENT, value)
-        if (value in linkedUsers) return NodeRef(NodeKind.USER, value)
-        val address = canonicalAddress(value)
-        if (address != null && address in linkedAddresses) return NodeRef(NodeKind.ADDRESS, address)
-        // Rule 4: NIP-85 assertion subjects live in `d`, which no provider reports.
-        if (name == "d") {
-            return when (kind) {
-                30382 -> if (isCanonicalHex64(value)) NodeRef(NodeKind.USER, value) else null
-                30383 -> if (isCanonicalHex64(value)) NodeRef(NodeKind.EVENT, value) else null
-                30384 -> address?.let { NodeRef(NodeKind.ADDRESS, it) }
-                else -> null
-            }
+    // Targets arrive in key form: LinkBuilder lowercased and validated every id, key and address.
+    private fun nodeRef(target: LinkTarget): NodeRef? =
+        when (target) {
+            is LinkTarget.Event -> NodeRef(NodeKind.EVENT, target.id)
+
+            is LinkTarget.User -> NodeRef(NodeKind.USER, target.pubkey)
+
+            is LinkTarget.Address -> NodeRef(NodeKind.ADDRESS, target.value)
+
+            // A `:Tag` key sits behind a uniqueness constraint: an unbounded value would fail the
+            // event's transaction on every retry, and a long one is no value to join on anyway.
+            is LinkTarget.Tag -> if (policy.fitsTagNode(target.value)) NodeRef(NodeKind.TAG, target.name + ":" + target.value) else null
         }
-        // Rule 5: kinds Quartz does not type (or types without a provider) — by name and shape.
-        // `q` uses the shape too: QTag.parseAddressId rejects every address (it refuses a ':').
-        return when (name) {
-            "e", "E" -> {
-                if (isCanonicalHex64(value)) NodeRef(NodeKind.EVENT, value) else null
-            }
 
-            "p", "P" -> {
-                if (isCanonicalHex64(value)) NodeRef(NodeKind.USER, value) else null
-            }
-
-            "a", "A" -> {
-                address?.let { NodeRef(NodeKind.ADDRESS, it) }
-            }
-
-            "q" -> {
-                when {
-                    isCanonicalHex64(value) -> NodeRef(NodeKind.EVENT, value)
-                    address != null -> NodeRef(NodeKind.ADDRESS, address)
-                    else -> null
+    /**
+     * [link]'s edge properties: its props in store form plus its `via`, with numbers widened to
+     * the `Long` / `Double` Neo4j returns. Null when a value carries a private key: the link is
+     * then dropped whole rather than stored without the qualifier it was made with.
+     */
+    private fun storeProps(
+        link: Link<*>,
+        secrets: Set<String>,
+    ): Map<String, Any>? {
+        val source = link.props?.toMap()
+        if (source.isNullOrEmpty() && link.via == null) return emptyMap()
+        val out = HashMap<String, Any>()
+        source?.forEach { (key, value) ->
+            val stored: Any =
+                when (value) {
+                    is Int -> value.toLong()
+                    is Short -> value.toLong()
+                    is Byte -> value.toLong()
+                    is Float -> value.toDouble()
+                    is String -> if (Secrets.leaks(value, secrets)) return null else value
+                    is List<*> -> value.map { it.toString() }.also { list -> if (list.any { Secrets.leaks(it, secrets) }) return null }
+                    else -> value
                 }
-            }
-
-            else -> {
-                null
-            }
+            out[key] = stored
         }
-    }
-
-    private fun derived(
-        family: Char,
-        segment: String,
-        bucketed: Boolean,
-        kind: Int,
-        target: NodeRef,
-        via: String?,
-    ): EdgeDoc {
-        val props = HashMap<String, Any>()
-        props[VIA] = via ?: LinkRules.VIA_CONTENT
-        if (bucketed) props[KIND] = kind.toLong()
-        return EdgeDoc(RelTypes.derived(family, segment), target, props)
+        link.via?.let { out[VIA] = it }
+        return out
     }
 
     companion object {
-        const val ROLES = "roles"
         const val VIA = "via"
-        const val KIND = "kind"
         const val D = "d"
         const val EXPIRES_AT = "expires_at"
 
         /**
-         * The typed Quartz class for [event] — hint providers live on the subclasses. A plain
+         * The typed Quartz class for [event] — the kind mappers are registered by class. A plain
          * [Event] of a known kind (as a store hands back) is re-created through [EventFactory].
          */
         fun typed(event: Event): Event {
@@ -282,40 +147,5 @@ class EdgeDeriver(
                     it.size >= 2 && it[0] == "expiration"
                 }?.get(1)
                 ?.toLongOrNull()
-
-        // A provider parses the event's tags lazily; a malformed tag must not lose the rest of the
-        // event's graph, so a throwing provider contributes nothing.
-        private inline fun providerSet(block: () -> List<String>?): List<String> = runCatching(block).getOrNull() ?: emptyList()
-
-        private fun List<String>.filterCanonicalHex(): Set<String> = filterTo(HashSet()) { isCanonicalHex64(it) }
     }
-}
-
-/**
- * Collects edges, collapsing duplicates to one per (type, target, via) with their roles unioned.
- * `via` is part of the key: one target reached two ways (a 10040 naming a service for both
- * `30382:rank` and `30382:followers`) is two facts, and a query filters on either.
- */
-private class EdgeCollector {
-    private val byKey = LinkedHashMap<Triple<String, NodeRef, Any?>, EdgeDoc>()
-
-    fun add(edge: EdgeDoc) {
-        val key = Triple(edge.type, edge.target, edge.props[EdgeDeriver.VIA])
-        val existing = byKey[key]
-        if (existing == null) {
-            byKey[key] = edge
-            return
-        }
-        @Suppress("UNCHECKED_CAST")
-        val a = existing.props[EdgeDeriver.ROLES] as List<String>?
-
-        @Suppress("UNCHECKED_CAST")
-        val b = edge.props[EdgeDeriver.ROLES] as List<String>?
-        if (b != null && a != b) {
-            val merged = ((a ?: emptyList()) + b).distinct()
-            byKey[key] = existing.copy(props = existing.props + (EdgeDeriver.ROLES to merged))
-        }
-    }
-
-    fun edges(): List<EdgeDoc> = byKey.values.toList()
 }

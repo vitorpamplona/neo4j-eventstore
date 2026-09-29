@@ -28,12 +28,11 @@ import com.vitorpamplona.neo4j.eventstore.engine.GraphIndex
 import com.vitorpamplona.neo4j.eventstore.engine.client.Neo4jGraphIndex
 import com.vitorpamplona.neo4j.eventstore.engine.client.SchemaInstaller
 import com.vitorpamplona.neo4j.eventstore.engine.derive.EdgeDeriver
-import com.vitorpamplona.neo4j.eventstore.engine.derive.RoleTable
 import com.vitorpamplona.neo4j.eventstore.engine.metrics.MeteredGraphIndex
 import com.vitorpamplona.neo4j.eventstore.engine.schema.GraphPolicy
-import com.vitorpamplona.neo4j.eventstore.engine.schema.KindRegistry
 import com.vitorpamplona.neo4j.eventstore.engine.schema.Labels
 import com.vitorpamplona.neo4j.eventstore.engine.schema.RelTypes
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
 import com.vitorpamplona.neo4j.eventstore.feed.ChangeListener
 import com.vitorpamplona.neo4j.eventstore.feed.FeedStats
 import com.vitorpamplona.neo4j.eventstore.feed.GraphFeed
@@ -76,7 +75,6 @@ class GraphProjection private constructor(
     val dirty: DirtyTracker,
     val reconcileLoop: ReconcileLoop,
     val cypher: CypherService,
-    private val registry: KindRegistry,
     private val policy: GraphPolicy,
     private val scope: CoroutineScope,
 ) : AutoCloseable {
@@ -87,8 +85,8 @@ class GraphProjection private constructor(
 
     /**
      * The live schema view behind `GET /graph/schema` (spec §8.6): version, labels and
-     * relationship types with counts (each an O(1) count-store read), the role table, the kind
-     * registry version and the policy.
+     * relationship types with counts (each an O(1) count-store read), every relation the
+     * vocabulary can write (a type with no edges yet is absent from the counts), and the policy.
      */
     suspend fun schema(): JsonObject =
         withContext(Dispatchers.IO) {
@@ -108,33 +106,17 @@ class GraphProjection private constructor(
                 JsonObject(
                     mapOf(
                         "schema_version" to JsonPrimitive(meta["schema_version"]?.toString() ?: SchemaInstaller.SCHEMA_VERSION),
-                        "kind_registry_version" to JsonPrimitive(registry.version),
                         "policy" to
                             JsonObject(
                                 mapOf(
                                     "hash" to JsonPrimitive(policy.hash()),
-                                    "tag_nodes" to JsonArray(policy.tagNodeNames.sorted().map { JsonPrimitive(it) }),
+                                    "max_tag_value_bytes" to JsonPrimitive(policy.maxTagValueBytes),
                                     "excluded_kinds" to JsonArray(policy.excludedKinds.sorted().map { JsonPrimitive(it) }),
                                 ),
                             ),
                         "labels" to JsonObject(labels.mapValues { JsonPrimitive(it.value) }),
                         "relationship_types" to JsonObject(types.mapValues { JsonPrimitive(it.value) }),
-                        "implied_roles" to
-                            JsonArray(
-                                RoleTable.implied.map { r ->
-                                    JsonObject(
-                                        mapOf(
-                                            "kinds" to
-                                                (
-                                                    r.kinds?.sorted()?.let { k -> JsonArray(k.map { JsonPrimitive(it) }) }
-                                                        ?: JsonPrimitive("any")
-                                                ),
-                                            "tag" to JsonPrimitive(r.tag),
-                                            "role" to JsonPrimitive(r.role),
-                                        ),
-                                    )
-                                },
-                            ),
+                        "relations" to JsonArray(Relation.ALL.map { JsonPrimitive(it.name) }),
                     ),
                 )
             }
@@ -181,7 +163,6 @@ class GraphProjection private constructor(
             source: SourceOfTruth,
             database: String = SchemaInstaller.DEFAULT_DATABASE,
             policy: GraphPolicy = GraphPolicy.Default,
-            registry: KindRegistry = KindRegistry.quartzKnownKinds(),
             cursor: CursorStore? = null,
             audit: CypherAudit? = null,
             installSchema: Boolean = true,
@@ -199,7 +180,6 @@ class GraphProjection private constructor(
                 source = source,
                 database = database,
                 policy = policy,
-                registry = registry,
                 cursor = cursor,
                 audit = audit,
                 installSchema = installSchema,
@@ -213,7 +193,6 @@ class GraphProjection private constructor(
             source: SourceOfTruth,
             database: String = SchemaInstaller.DEFAULT_DATABASE,
             policy: GraphPolicy = GraphPolicy.Default,
-            registry: KindRegistry = KindRegistry.quartzKnownKinds(),
             cursor: CursorStore? = null,
             audit: CypherAudit? = null,
             installSchema: Boolean = true,
@@ -225,12 +204,12 @@ class GraphProjection private constructor(
         ): GraphProjection {
             require(queueCapacity >= 1) { "queueCapacity must be >= 1, was $queueCapacity" }
             driver.verifyConnectivity()
-            if (installSchema) SchemaInstaller(driver, database).install(registry, policy)
+            if (installSchema) SchemaInstaller(driver, database).install(policy)
             if (requireSafeServer) {
                 val problems = ServerSafety.problems(driver, database)
                 check(problems.isEmpty()) { "refusing to serve Cypher from an unsafe Neo4j server: $problems" }
             }
-            val index = MeteredGraphIndex(Neo4jGraphIndex(driver, database, EdgeDeriver(registry, policy)))
+            val index = MeteredGraphIndex(Neo4jGraphIndex(driver, database, EdgeDeriver(policy)))
             val dirty = DirtyTracker()
             dirtyFile?.let { dirty.load(it) }
             val feed = GraphFeed(index, dirty, policy, queueCapacity)
@@ -248,7 +227,6 @@ class GraphProjection private constructor(
                 dirty = dirty,
                 reconcileLoop = ReconcileLoop(reconciler, dirty, cursor),
                 cypher = CypherService(cypherDriver, database, hydrator ?: Hydrator { ids -> source.fetch(ids) }, audit),
-                registry = registry,
                 policy = policy,
                 scope = scope,
             )

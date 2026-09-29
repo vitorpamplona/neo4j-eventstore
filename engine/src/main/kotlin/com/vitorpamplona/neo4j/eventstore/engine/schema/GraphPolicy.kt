@@ -27,27 +27,23 @@ import java.security.MessageDigest
  * `:Meta`, and a changed policy is converged by the reconciler.
  *
  * - Every kind is projected; [excludedKinds] is an operator knob, EMPTY by default.
- * - A single-letter tag whose value is NOT a reference becomes a `:Tag` node only when its name is
- *   in [tagNodeNames] and its value is at most [maxTagValueBytes]. References are never dropped by
- *   name — every tag that resolves to an event, user or address becomes an edge.
+ * - Which tag values become `:Tag` nodes is not configuration: each kind's mapper decides
+ *   (`docs/vocabulary.md`, rule 5). A value over [maxTagValueBytes] never becomes a node.
+ * - Curated text lifted onto nodes (names, titles) is cut to [maxCuratedBytes].
  */
 data class GraphPolicy(
-    val tagNodeNames: Set<String> = DEFAULT_TAG_NODES,
     val excludedKinds: Set<Int> = emptySet(),
     val maxTagValueBytes: Int = 256,
     val maxCuratedBytes: Int = 256,
 ) {
     fun admits(kind: Int) = kind !in excludedKinds
 
-    fun isTagNode(
-        name: String,
-        value: String,
-    ) = name in tagNodeNames && value.isNotEmpty() && value.encodeToByteArray().size <= maxTagValueBytes
+    /** Whether [value] is small enough to key a `:Tag` node. */
+    fun fitsTagNode(value: String) = value.isNotEmpty() && value.encodeToByteArray().size <= maxTagValueBytes
 
     fun hash(): String {
         val canonical =
-            "tags=" + tagNodeNames.sorted().joinToString(",") +
-                ";excluded=" + excludedKinds.sorted().joinToString(",") +
+            "excluded=" + excludedKinds.sorted().joinToString(",") +
                 ";maxTag=" + maxTagValueBytes + ";maxCurated=" + maxCuratedBytes
         return MessageDigest
             .getInstance("SHA-256")
@@ -57,13 +53,6 @@ data class GraphPolicy(
     }
 
     companion object {
-        /**
-         * Hashtags, NIP-73 external ids, kind references, NIP-32 labels and namespaces, URLs and
-         * geohashes: the non-reference tags worth joining on. Not `d` (the `:Address` covers it)
-         * and not `x` (one file hash per event would be one useless node per event).
-         */
-        val DEFAULT_TAG_NODES = setOf("t", "i", "k", "l", "L", "r", "g")
-
         val Default = GraphPolicy()
     }
 }
