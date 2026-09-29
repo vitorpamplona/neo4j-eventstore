@@ -35,16 +35,22 @@ import com.vitorpamplona.quartz.nip01Core.store.IdAndTime
  * - a replaceable / addressable event competes for its slot under the NIP-01 tiebreak, so a stale
  *   delivery is dropped and a newer one unapplies the incumbent (the source may supersede
  *   atomically and never report the loser's removal);
- * - an id unapplied within the fence window is not re-applied by a late put (unless [apply] is
- *   told the source currently holds it — the reconciler's `fenced = false`).
- * The one residual (a remove arriving more than a fence window before its own put) is an
- * "extra" the reconciler removes.
+ * - an id unapplied within the fence window is not re-applied by a late put.
+ *
+ * Two residuals no local rule can see, both left to the reconciler: a remove arriving more than
+ * a fence window before its own put; and, when the source supersedes WITHOUT reporting the
+ * loser, a stale version delivered after its successor was itself removed (the slot looks
+ * empty). The reconciler repairs them with AUTHORITATIVE applies: the source says the event is
+ * held, so it bypasses the fence and displaces whatever occupies its slot.
  */
 interface GraphIndex : AutoCloseable {
-    /** Projects [events]; see the contract. `fenced = false` bypasses the recent-removal fence. */
+    /**
+     * Projects [events]; see the contract. [authoritative] (the reconciler: the source holds these
+     * NOW) bypasses the recent-removal fence and displaces a slot's incumbent whatever its age.
+     */
     suspend fun apply(
         events: List<Event>,
-        fenced: Boolean = true,
+        authoritative: Boolean = false,
     ): ApplyOutcome
 
     /** Unprojects [ids] (the stub rule of spec §4.1) and fences each id against a late re-put. */

@@ -1,5 +1,8 @@
 plugins {
     alias(libs.plugins.kotlin.jvm)
+    // SimulatedSource + GraphCorpus (src/testFixtures): the deterministic source-of-truth
+    // simulation the unit convergence tests and the Neo4j integration tests share.
+    `java-test-fixtures`
     alias(libs.plugins.vanniktech.mavenPublish)
 }
 
@@ -7,6 +10,7 @@ dependencies {
     api(project(":engine"))
     implementation(libs.kotlinx.coroutines)
     implementation(libs.kotlinx.serialization.json)
+    testFixturesImplementation(libs.kotlinx.coroutines)
     testImplementation(kotlin("test"))
     testImplementation(libs.kotlinx.coroutines.test)
 }

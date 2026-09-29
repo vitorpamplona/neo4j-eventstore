@@ -70,21 +70,21 @@ class InMemoryGraphIndex(
 
     override suspend fun apply(
         events: List<Event>,
-        fenced: Boolean,
+        authoritative: Boolean,
     ): ApplyOutcome =
         lock.withLock {
             var outcome = ApplyOutcome()
-            for (event in events) outcome += applyOne(event, fenced)
+            for (event in events) outcome += applyOne(event, authoritative)
             outcome
         }
 
     private fun applyOne(
         event: Event,
-        fenced: Boolean,
+        authoritative: Boolean,
     ): ApplyOutcome {
         if (!deriver.policy.admits(event.kind)) return ApplyOutcome(excluded = 1)
         if (event.id in held) return ApplyOutcome(duplicate = 1)
-        if (fenced) {
+        if (!authoritative) {
             val at = removedAt[event.id]
             if (at != null && at >= nowSecs() - fenceSeconds) return ApplyOutcome(fenced = 1)
         }
@@ -96,7 +96,7 @@ class InMemoryGraphIndex(
                 null -> null
             }?.let { held[it] }
         if (incumbent != null) {
-            if (wins(incumbent.createdAt, incumbent.id, doc.createdAt, doc.id)) return ApplyOutcome(stale = 1)
+            if (!authoritative && wins(incumbent.createdAt, incumbent.id, doc.createdAt, doc.id)) return ApplyOutcome(stale = 1)
             unapplyHeld(incumbent)
         }
         write(doc)
