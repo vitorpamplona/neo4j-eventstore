@@ -20,9 +20,25 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
-import com.vitorpamplona.quartz.nip42RelayAuth.RelayAuthEvent
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.quartz.nip59Giftwrap.wraps.EphemeralGiftWrapEvent
+import com.vitorpamplona.quartz.nip59Giftwrap.wraps.GiftWrapEvent
+import kotlin.test.Test
+import kotlin.test.assertEquals
 
-/** Quartz's `nip42RelayAuth` classes. */
-internal fun KindMappers.Builder.nip42RelayAuth() {
-    free<RelayAuthEvent>()
+class Nip59GiftwrapLinksTest {
+    private val id = "0".repeat(64)
+    private val sig = "0".repeat(128)
+    private val throwaway = "1".repeat(64)
+    private val recipient = "2".repeat(64)
+
+    @Test
+    fun wrapsLinkOnlyTheirRecipient() {
+        val tags = arrayOf(arrayOf("p", recipient, "wss://inbox.example/"))
+        val expected = listOf(Link(Relation.RECIPIENT, LinkTarget.User(recipient), "p"))
+        assertEquals(expected, GiftWrapEvent(id, throwaway, 1, tags, "ciphertext", sig).links())
+        assertEquals(expected, EphemeralGiftWrapEvent(id, throwaway, 1, tags, "ciphertext", sig).links())
+    }
 }

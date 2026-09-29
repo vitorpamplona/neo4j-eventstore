@@ -20,6 +20,32 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
-/** Quartz's `nip89AppHandlers` classes. */
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.PlatformProps
+import com.vitorpamplona.quartz.nip01Core.tags.aTag.ATag
+import com.vitorpamplona.quartz.nip01Core.tags.kinds.KindTag
+import com.vitorpamplona.quartz.nip89AppHandlers.definition.AppDefinitionEvent
+import com.vitorpamplona.quartz.nip89AppHandlers.recommendation.AppRecommendationEvent
+import com.vitorpamplona.quartz.nip89AppHandlers.recommendation.tags.RecommendationTag
+
+/** Quartz's `nip89AppHandlers` classes. The `client` tag any kind carries is [everyKindLinks]'. */
 internal fun KindMappers.Builder.nip89AppHandlers() {
+    /*
+     * NIP-89: "App descriptor events SHOULD tag or otherwise reference related site manifest
+     * events"; a [Nip89ManifestReleaseTag] (`latest`, `next`) says which release a manifest is, a
+     * plain `a` does not. The `client` tag is linked for every kind by [KindLinks.of].
+     */
+    on<AppDefinitionEvent> { e ->
+        each(e.tags, KindTag::parse) { tag(Relation.TAG, KindTag.TAG_NAME, it.toString()) }
+        each(e.tags, Nip89ManifestReleaseTag::parse) { address(Relation.SITE_MANIFEST, it.address, it.release, it.linkProps()) }
+        each(e.tags, ATag::parse) { address(Relation.SITE_MANIFEST, it, ATag.TAG_NAME) }
+        hashtags(e.tags)
+    }
+    // NIP-89: each `a` is a recommended 31990 handler; its 4th slot says for which platform (a blank one names none).
+    on<AppRecommendationEvent> { e ->
+        each(e.tags, RecommendationTag::parse) {
+            address(Relation.RECOMMENDED, it.address, RecommendationTag.TAG_NAME, PlatformProps(it.platform?.ifBlank { null }))
+        }
+    }
 }

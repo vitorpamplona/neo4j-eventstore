@@ -20,6 +20,9 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.quartz.nip50Search.SearchRelayListEvent
+
 /** Quartz's `nip50Search` classes. */
 internal fun KindMappers.Builder.nip50Search() {
+    free<SearchRelayListEvent>()
 }

@@ -20,6 +20,9 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.quartz.nip62RequestToVanish.RequestToVanishEvent
+
 /** Quartz's `nip62RequestToVanish` classes. */
 internal fun KindMappers.Builder.nip62RequestToVanish() {
+    free<RequestToVanishEvent>()
 }

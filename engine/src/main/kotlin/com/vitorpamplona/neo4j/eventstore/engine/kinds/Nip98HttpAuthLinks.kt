@@ -20,6 +20,9 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.quartz.nip98HttpAuth.HTTPAuthorizationEvent
+
 /** Quartz's `nip98HttpAuth` classes. */
 internal fun KindMappers.Builder.nip98HttpAuth() {
+    free<HTTPAuthorizationEvent>()
 }

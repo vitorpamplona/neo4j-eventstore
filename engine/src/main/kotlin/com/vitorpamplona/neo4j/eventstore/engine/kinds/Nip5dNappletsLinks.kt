@@ -20,6 +20,15 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
-/** Quartz's `nip5dNapplets` classes. */
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.quartz.nip5dNapplets.NamedNappletEvent
+import com.vitorpamplona.quartz.nip5dNapplets.NappletSnapshotEvent
+import com.vitorpamplona.quartz.nip5dNapplets.RootNappletEvent
+
+/** Quartz's `nip5dNapplets` classes: manifests in NIP-5A's tag set ([nip5aSiteManifestLinks]). */
 internal fun KindMappers.Builder.nip5dNapplets() {
+    on<NamedNappletEvent> { e -> nip5aSiteManifestLinks(e.tags) }
+    on<RootNappletEvent> { e -> nip5aSiteManifestLinks(e.tags) }
+    // A snapshot's single `a` is the named or root napplet it snapshots, not a copy parent.
+    on<NappletSnapshotEvent> { e -> nip5aSiteManifestLinks(e.tags, Relation.SNAPSHOTTED) }
 }

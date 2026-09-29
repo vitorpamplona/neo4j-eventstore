@@ -20,23 +20,27 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
-import com.vitorpamplona.quartz.nip01Core.tags.events.ETag
-import com.vitorpamplona.quartz.nip01Core.tags.people.PTag
-import com.vitorpamplona.quartz.nip47WalletConnect.events.NwcInfoEvent
-import com.vitorpamplona.quartz.nip47WalletConnect.events.NwcNotificationEvent
-import com.vitorpamplona.quartz.nip47WalletConnect.events.NwcRequestEvent
-import com.vitorpamplona.quartz.nip47WalletConnect.events.NwcResponseEvent
+import com.vitorpamplona.quartz.nipXXPushNotifications.deregistration.PushDeregistrationEvent
+import com.vitorpamplona.quartz.nipXXPushNotifications.preferences.PushPreferencesEvent
+import com.vitorpamplona.quartz.nipXXPushNotifications.registration.PushRegistrationEvent
+import kotlin.test.Test
+import kotlin.test.assertEquals
 
-/** Quartz's `nip47WalletConnect` classes. */
-internal fun KindMappers.Builder.nip47WalletConnect() {
-    // NIP-47: `p` is the wallet service the request is encrypted to.
-    on<NwcRequestEvent> { e -> user(Relation.RECIPIENT, e.walletServicePubKey(), PTag.TAG_NAME) }
-    on<NwcResponseEvent> { e ->
-        event(Relation.REQUEST, e.requestId(), ETag.TAG_NAME)
-        user(Relation.REQUEST_AUTHOR, e.requestAuthor(), PTag.TAG_NAME)
+class NipXXPushNotificationsLinksTest {
+    private val service = "5".repeat(64)
+    private val tags = arrayOf(arrayOf("p", service), arrayOf("app", "divine"))
+
+    @Test
+    fun everyPushControlEventLinksItsServiceOnly() {
+        val expected = listOf(Link(Relation.NOTIFICATION_SERVER, LinkTarget.User(service), "p"))
+        val id = "0".repeat(64)
+        val author = "1".repeat(64)
+        val sig = "0".repeat(128)
+        assertEquals(expected, PushRegistrationEvent(id, author, 1, tags, "ciphertext", sig).links())
+        assertEquals(expected, PushDeregistrationEvent(id, author, 1, tags, "ciphertext", sig).links())
+        assertEquals(expected, PushPreferencesEvent(id, author, 1, tags, "ciphertext", sig).links())
     }
-    // NIP-47: `p` is the client the notification is encrypted to.
-    on<NwcNotificationEvent> { e -> user(Relation.RECIPIENT, e.clientPubKey(), PTag.TAG_NAME) }
-    free<NwcInfoEvent>()
 }

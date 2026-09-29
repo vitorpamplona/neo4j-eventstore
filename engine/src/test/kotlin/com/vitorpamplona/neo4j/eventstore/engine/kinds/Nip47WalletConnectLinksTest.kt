@@ -20,23 +20,42 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
-import com.vitorpamplona.quartz.nip01Core.tags.events.ETag
-import com.vitorpamplona.quartz.nip01Core.tags.people.PTag
-import com.vitorpamplona.quartz.nip47WalletConnect.events.NwcInfoEvent
 import com.vitorpamplona.quartz.nip47WalletConnect.events.NwcNotificationEvent
 import com.vitorpamplona.quartz.nip47WalletConnect.events.NwcRequestEvent
 import com.vitorpamplona.quartz.nip47WalletConnect.events.NwcResponseEvent
+import kotlin.test.Test
+import kotlin.test.assertEquals
 
-/** Quartz's `nip47WalletConnect` classes. */
-internal fun KindMappers.Builder.nip47WalletConnect() {
-    // NIP-47: `p` is the wallet service the request is encrypted to.
-    on<NwcRequestEvent> { e -> user(Relation.RECIPIENT, e.walletServicePubKey(), PTag.TAG_NAME) }
-    on<NwcResponseEvent> { e ->
-        event(Relation.REQUEST, e.requestId(), ETag.TAG_NAME)
-        user(Relation.REQUEST_AUTHOR, e.requestAuthor(), PTag.TAG_NAME)
+class Nip47WalletConnectLinksTest {
+    private val id = "0".repeat(64)
+    private val sig = "0".repeat(128)
+    private val client = "1".repeat(64)
+    private val wallet = "2".repeat(64)
+    private val request = "3".repeat(64)
+
+    @Test
+    fun requestAndNotificationLinkTheirRecipient() {
+        assertEquals(
+            listOf(Link(Relation.RECIPIENT, LinkTarget.User(wallet), "p")),
+            NwcRequestEvent(id, client, 1, arrayOf(arrayOf("p", wallet), arrayOf("encryption", "nip44_v2")), "", sig).links(),
+        )
+        assertEquals(
+            listOf(Link(Relation.RECIPIENT, LinkTarget.User(client), "p")),
+            NwcNotificationEvent(id, wallet, 1, arrayOf(arrayOf("p", client)), "", sig).links(),
+        )
     }
-    // NIP-47: `p` is the client the notification is encrypted to.
-    on<NwcNotificationEvent> { e -> user(Relation.RECIPIENT, e.clientPubKey(), PTag.TAG_NAME) }
-    free<NwcInfoEvent>()
+
+    @Test
+    fun responseLinksItsRequestAndItsAuthor() {
+        assertEquals(
+            listOf(
+                Link(Relation.REQUEST, LinkTarget.Event(request), "e"),
+                Link(Relation.REQUEST_AUTHOR, LinkTarget.User(client), "p"),
+            ),
+            NwcResponseEvent(id, wallet, 1, arrayOf(arrayOf("p", client), arrayOf("e", request)), "", sig).links(),
+        )
+    }
 }

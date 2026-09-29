@@ -20,6 +20,12 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.quartz.nip01Core.tags.people.PTag
+import com.vitorpamplona.quartz.nip46RemoteSigner.NostrConnectEvent
+
 /** Quartz's `nip46RemoteSigner` classes. */
 internal fun KindMappers.Builder.nip46RemoteSigner() {
+    // NIP-46: each side `p`-tags the other and encrypts to it.
+    on<NostrConnectEvent> { e -> user(Relation.RECIPIENT, e.nip46RecipientPubKey(), PTag.TAG_NAME) }
 }

@@ -20,9 +20,36 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
-import com.vitorpamplona.quartz.nip42RelayAuth.RelayAuthEvent
+import com.vitorpamplona.quartz.nip01Core.core.Address
+import com.vitorpamplona.quartz.nip01Core.core.has
+import com.vitorpamplona.quartz.utils.ensure
 
-/** Quartz's `nip42RelayAuth` classes. */
-internal fun KindMappers.Builder.nip42RelayAuth() {
-    free<RelayAuthEvent>()
+/**
+ * NIP-5A `["app", "<kind>:<pubkey>:<d-tag>", "<relay>"]`: an upstream app descriptor (a 31990,
+ * a 32267, …) the manifest is part of. A manifest may carry several. Main has no parser for it.
+ */
+internal object Nip5aAppTag {
+    const val TAG_NAME = "app"
+
+    fun parse(tag: Array<String>): Address? {
+        ensure(tag.has(1)) { return null }
+        ensure(tag[0] == TAG_NAME) { return null }
+        ensure(tag[1].isNotEmpty()) { return null }
+        return Address.parse(tag[1])
+    }
+}
+
+/**
+ * NIP-5A `["A", "<kind>:<pubkey>:<d-tag>"]` on a copied nsite: the origin of its copy lineage.
+ * The lowercase `a` names only the immediate parent it was copied from. Main has no parser for it.
+ */
+internal object Nip5aOriginTag {
+    const val TAG_NAME = "A"
+
+    fun parse(tag: Array<String>): Address? {
+        ensure(tag.has(1)) { return null }
+        ensure(tag[0] == TAG_NAME) { return null }
+        ensure(tag[1].isNotEmpty()) { return null }
+        return Address.parse(tag[1])
+    }
 }

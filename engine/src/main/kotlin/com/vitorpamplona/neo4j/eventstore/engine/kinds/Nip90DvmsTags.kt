@@ -20,9 +20,18 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
-import com.vitorpamplona.quartz.nip42RelayAuth.RelayAuthEvent
+/**
+ * The NIP-90 `i` input types that point at their data (`text` and `prompt` carry it inline).
+ * Main's `InputTag` writes them as literals and has no constants.
+ */
+internal object Nip90InputType {
+    const val URL = "url"
+    const val EVENT = "event"
+    const val JOB = "job"
+}
 
-/** Quartz's `nip42RelayAuth` classes. */
-internal fun KindMappers.Builder.nip42RelayAuth() {
-    free<RelayAuthEvent>()
+/** The `param` keys a mapper reads. Main's `ParamTag` has no constants. */
+internal object Nip90ParamKey {
+    /** The discovery kinds' `["param", "user", <pubkey>]`: the user to compute for. */
+    const val USER = "user"
 }

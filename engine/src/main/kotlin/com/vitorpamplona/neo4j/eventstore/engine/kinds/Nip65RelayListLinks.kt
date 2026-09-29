@@ -20,6 +20,9 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.quartz.nip65RelayList.AdvertisedRelayListEvent
+
 /** Quartz's `nip65RelayList` classes. */
 internal fun KindMappers.Builder.nip65RelayList() {
+    free<AdvertisedRelayListEvent>()
 }

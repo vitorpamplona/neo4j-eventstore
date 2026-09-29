@@ -20,9 +20,8 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
-import com.vitorpamplona.quartz.nip42RelayAuth.RelayAuthEvent
+import com.vitorpamplona.quartz.nip01Core.tags.people.PTag
+import com.vitorpamplona.quartz.nip46RemoteSigner.NostrConnectEvent
 
-/** Quartz's `nip42RelayAuth` classes. */
-internal fun KindMappers.Builder.nip42RelayAuth() {
-    free<RelayAuthEvent>()
-}
+/** Main's `NostrConnectEvent.recipientPubKey()` is private: the first `p`'s value, read as it reads it. */
+internal fun NostrConnectEvent.nip46RecipientPubKey(): String? = tags.firstOrNull { it.size > 1 && it[0] == PTag.TAG_NAME }?.get(1)

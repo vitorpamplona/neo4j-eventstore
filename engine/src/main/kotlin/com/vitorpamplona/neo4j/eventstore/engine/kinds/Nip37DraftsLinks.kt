@@ -20,6 +20,26 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
+import com.vitorpamplona.quartz.nip01Core.tags.aTag.ATag
+import com.vitorpamplona.quartz.nip01Core.tags.kinds.KindTag
+import com.vitorpamplona.quartz.nip10Notes.tags.MarkedETag
+import com.vitorpamplona.quartz.nip37Drafts.DraftWrapEvent
+import com.vitorpamplona.quartz.nip37Drafts.privateOutbox.PrivateOutboxRelayListEvent
+
 /** Quartz's `nip37Drafts` classes. */
 internal fun KindMappers.Builder.nip37Drafts() {
+    /*
+     * NIP-37: the draft itself is encrypted. Quartz copies its thread anchors into public tags
+     * (`ExposeInDraft`) so a draft shows in context: the channel or live activity it belongs to
+     * (ROOT) and the message it replies to (PARENT). `k` says which kind the draft is.
+     */
+    on<DraftWrapEvent> { e ->
+        each(e.tags, KindTag::parse) { tag(Relation.TAG, KindTag.TAG_NAME, it.toString()) }
+        each(e.tags, MarkedETag::parseRoot) { event(Relation.ROOT, it, MarkedETag.TAG_NAME) }
+        each(e.tags, MarkedETag::parseReply) { event(Relation.PARENT, it, MarkedETag.TAG_NAME) }
+        each(e.tags, ATag::parse) { address(Relation.ROOT, it, ATag.TAG_NAME) }
+    }
+    free<PrivateOutboxRelayListEvent>()
 }

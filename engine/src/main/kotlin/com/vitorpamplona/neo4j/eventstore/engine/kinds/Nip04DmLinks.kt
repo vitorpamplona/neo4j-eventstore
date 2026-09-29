@@ -20,6 +20,16 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.quartz.nip01Core.tags.people.PTag
+import com.vitorpamplona.quartz.nip04Dm.messages.EncryptedDmEvent
+import com.vitorpamplona.quartz.nip10Notes.tags.MarkedETag
+
 /** Quartz's `nip04Dm` classes. */
 internal fun KindMappers.Builder.nip04Dm() {
+    // NIP-04: `p` is the receiver, `e` "the previous message in a conversation or a message we are explicitly replying to".
+    on<EncryptedDmEvent> { e ->
+        user(Relation.RECIPIENT, e.recipientPubKey(), PTag.TAG_NAME)
+        event(Relation.PARENT, e.replyTo(), MarkedETag.TAG_NAME)
+    }
 }

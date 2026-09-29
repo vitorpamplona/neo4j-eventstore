@@ -20,6 +20,11 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.quartz.nipB7Blossom.BlossomAuthorizationEvent
+import com.vitorpamplona.quartz.nipB7Blossom.BlossomServersEvent
+
 /** Quartz's `nipB7Blossom` classes. */
 internal fun KindMappers.Builder.nipB7Blossom() {
+    free<BlossomAuthorizationEvent>()
+    free<BlossomServersEvent>()
 }

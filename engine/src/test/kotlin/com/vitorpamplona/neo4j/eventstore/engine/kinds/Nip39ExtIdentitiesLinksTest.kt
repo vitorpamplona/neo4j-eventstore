@@ -20,9 +20,34 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
-import com.vitorpamplona.quartz.nip42RelayAuth.RelayAuthEvent
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.quartz.nip39ExtIdentities.ExternalIdentitiesEvent
+import kotlin.test.Test
+import kotlin.test.assertEquals
 
-/** Quartz's `nip42RelayAuth` classes. */
-internal fun KindMappers.Builder.nip42RelayAuth() {
-    free<RelayAuthEvent>()
+class Nip39ExtIdentitiesLinksTest {
+    @Test
+    fun identityClaimsAreExternalIdTags() {
+        val event =
+            ExternalIdentitiesEvent(
+                "0".repeat(64),
+                "1".repeat(64),
+                1,
+                arrayOf(
+                    arrayOf("i", "github:semisol", "9721ce4ee4fceb91c9711ca2a6c9a5ab"),
+                    arrayOf("i", "twitter:semisol_public", "1619358434134196225"),
+                ),
+                "",
+                "0".repeat(128),
+            )
+        assertEquals(
+            listOf(
+                Link(Relation.TAG, LinkTarget.Tag("i", "github:semisol"), "i"),
+                Link(Relation.TAG, LinkTarget.Tag("i", "twitter:semisol_public"), "i"),
+            ),
+            event.links(),
+        )
+    }
 }

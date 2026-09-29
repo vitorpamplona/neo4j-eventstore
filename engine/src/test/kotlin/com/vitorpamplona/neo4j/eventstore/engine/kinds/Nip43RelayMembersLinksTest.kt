@@ -20,30 +20,53 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
-import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.MemberProps
-import com.vitorpamplona.quartz.nip01Core.tags.people.PTag
 import com.vitorpamplona.quartz.nip43RelayMembers.addMember.RelayAddMemberEvent
-import com.vitorpamplona.quartz.nip43RelayMembers.inviteRequest.RelayInviteRequestEvent
-import com.vitorpamplona.quartz.nip43RelayMembers.joinRequest.RelayJoinRequestEvent
-import com.vitorpamplona.quartz.nip43RelayMembers.leaveRequest.RelayLeaveRequestEvent
 import com.vitorpamplona.quartz.nip43RelayMembers.list.RelayMembershipListEvent
-import com.vitorpamplona.quartz.nip43RelayMembers.list.tags.MemberTag
 import com.vitorpamplona.quartz.nip43RelayMembers.removeMember.RelayRemoveMemberEvent
-import com.vitorpamplona.quartz.nip43RelayMembers.roles.RelayRoleEvent
+import kotlin.test.Test
+import kotlin.test.assertEquals
 
-/** Quartz's `nip43RelayMembers` classes. */
-internal fun KindMappers.Builder.nip43RelayMembers() {
-    on<RelayAddMemberEvent> { e -> each(e.tags, PTag::parse) { user(Relation.ADDED_USER, it, PTag.TAG_NAME) } }
-    on<RelayRemoveMemberEvent> { e -> each(e.tags, PTag::parse) { user(Relation.REMOVED_USER, it, PTag.TAG_NAME) } }
-    // `["member", <pubkey>, <role id>…]`: the NIP-43 kind 33534 roles the relay assigned ride on the link
-    // (no roles is no props).
-    on<RelayMembershipListEvent> { e ->
-        each(e.tags, MemberTag::parseMember) { user(Relation.MEMBER, it.pubKey, MemberTag.TAG_NAME, MemberProps(roles = it.roles)) }
+class Nip43RelayMembersLinksTest {
+    private val id = "0".repeat(64)
+    private val sig = "0".repeat(128)
+    private val relay = "f".repeat(64)
+    private val alice = "1".repeat(64)
+    private val bob = "2".repeat(64)
+
+    @Test
+    fun addAndRemoveLinkTheMember() {
+        val tags = arrayOf(arrayOf("-"), arrayOf("p", alice), arrayOf("p", "short"))
+        assertEquals(
+            listOf(Link(Relation.ADDED_USER, LinkTarget.User(alice), "p")),
+            RelayAddMemberEvent(id, relay, 1, tags, "", sig).links(),
+        )
+        assertEquals(
+            listOf(Link(Relation.REMOVED_USER, LinkTarget.User(alice), "p")),
+            RelayRemoveMemberEvent(id, relay, 1, tags, "", sig).links(),
+        )
     }
-    free<RelayInviteRequestEvent>()
-    free<RelayJoinRequestEvent>()
-    free<RelayLeaveRequestEvent>()
-    free<RelayRoleEvent>()
+
+    @Test
+    fun membershipListLinksEveryMember() {
+        val event =
+            RelayMembershipListEvent(
+                id,
+                relay,
+                1,
+                arrayOf(arrayOf("-"), arrayOf("member", alice, "moderator"), arrayOf("member", bob), arrayOf("p", "3".repeat(64))),
+                "",
+                sig,
+            )
+        assertEquals(
+            listOf(
+                Link(Relation.MEMBER, LinkTarget.User(alice), "member", MemberProps(roles = listOf("moderator"))),
+                Link(Relation.MEMBER, LinkTarget.User(bob), "member"),
+            ),
+            event.links(),
+        )
+    }
 }

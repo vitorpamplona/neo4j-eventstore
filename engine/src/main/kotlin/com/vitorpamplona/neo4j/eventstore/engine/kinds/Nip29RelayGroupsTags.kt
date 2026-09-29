@@ -18,11 +18,27 @@
  * AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
  * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
+@file:Suppress("ktlint:standard:filename")
+
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
-import com.vitorpamplona.quartz.nip42RelayAuth.RelayAuthEvent
+import com.vitorpamplona.quartz.nip01Core.core.HexKey
+import com.vitorpamplona.quartz.nip01Core.core.has
+import com.vitorpamplona.quartz.nip01Core.core.isValid
+import com.vitorpamplona.quartz.utils.ensure
 
-/** Quartz's `nip42RelayAuth` classes. */
-internal fun KindMappers.Builder.nip42RelayAuth() {
-    free<RelayAuthEvent>()
+/**
+ * `["participant", <pubkey>]`: one user connected to a group's live audio/video room, as the
+ * relay lists them in its kind 39004 (a LiveKit-deployment extension, not NIP-29 proper).
+ * Main has no parser for it (`GroupParticipantsEvent` reads the slot inline).
+ */
+internal object Nip29ParticipantTag {
+    const val TAG_NAME = "participant"
+
+    fun parse(tag: Array<String>): HexKey? {
+        ensure(tag.has(1)) { return null }
+        ensure(tag[0] == TAG_NAME) { return null }
+        ensure(tag[1].isValid()) { return null }
+        return tag[1]
+    }
 }

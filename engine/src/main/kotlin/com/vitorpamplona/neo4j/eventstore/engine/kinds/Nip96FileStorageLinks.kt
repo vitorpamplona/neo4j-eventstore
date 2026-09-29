@@ -20,6 +20,9 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.quartz.nip96FileStorage.config.FileServersEvent
+
 /** Quartz's `nip96FileStorage` classes. */
 internal fun KindMappers.Builder.nip96FileStorage() {
+    free<FileServersEvent>()
 }

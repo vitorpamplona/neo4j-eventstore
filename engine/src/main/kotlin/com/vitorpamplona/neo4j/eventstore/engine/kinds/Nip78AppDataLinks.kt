@@ -20,6 +20,11 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.quartz.nip78AppData.AppDataEvent
+import com.vitorpamplona.quartz.nip78AppData.AppSpecificDataEvent
+
 /** Quartz's `nip78AppData` classes. */
 internal fun KindMappers.Builder.nip78AppData() {
+    free<AppDataEvent>()
+    free<AppSpecificDataEvent>()
 }

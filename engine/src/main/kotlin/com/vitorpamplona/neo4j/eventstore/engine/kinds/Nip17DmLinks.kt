@@ -20,6 +20,27 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
+import com.vitorpamplona.quartz.nip01Core.tags.events.ETag
+import com.vitorpamplona.quartz.nip01Core.tags.people.PTag
+import com.vitorpamplona.quartz.nip17Dm.files.ChatMessageEncryptedFileHeaderEvent
+import com.vitorpamplona.quartz.nip17Dm.messages.ChatMessageEvent
+import com.vitorpamplona.quartz.nip17Dm.settings.DmRelayListEvent
+
 /** Quartz's `nip17Dm` classes. */
 internal fun KindMappers.Builder.nip17Dm() {
+    // NIP-17: `p` are the receivers, `e` "the direct parent message this post is replying to", `q` a NIP-18 quote.
+    on<ChatMessageEvent> { e ->
+        each(e.tags, PTag::parse) { user(Relation.RECIPIENT, it, PTag.TAG_NAME) }
+        each(e.tags, ETag::parse) { event(Relation.PARENT, it, ETag.TAG_NAME) }
+        quotes(e.tags)
+        contentMentions(e.content)
+    }
+    // A file message's `x` and `file-type` describe its blob: not links.
+    on<ChatMessageEncryptedFileHeaderEvent> { e ->
+        each(e.tags, PTag::parse) { user(Relation.RECIPIENT, it, PTag.TAG_NAME) }
+        each(e.tags, ETag::parse) { event(Relation.PARENT, it, ETag.TAG_NAME) }
+    }
+    free<DmRelayListEvent>()
 }

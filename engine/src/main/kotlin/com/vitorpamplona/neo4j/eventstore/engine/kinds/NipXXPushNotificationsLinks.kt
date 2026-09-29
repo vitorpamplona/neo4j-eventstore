@@ -20,6 +20,16 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.quartz.nip01Core.tags.people.PTag
+import com.vitorpamplona.quartz.nipXXPushNotifications.PushServiceEvent
+
 /** Quartz's `nipXXPushNotifications` classes. */
 internal fun KindMappers.Builder.nipXXPushNotifications() {
+    /*
+     * The push service the payload is encrypted to (the `p`), as marmot's token records name
+     * theirs. The `app` tag is an application id, not a reference; the payload is private.
+     * Registered at the base: registration, deregistration and preferences all link alike.
+     */
+    on<PushServiceEvent> { e -> user(Relation.NOTIFICATION_SERVER, e.pushService(), PTag.TAG_NAME) }
 }

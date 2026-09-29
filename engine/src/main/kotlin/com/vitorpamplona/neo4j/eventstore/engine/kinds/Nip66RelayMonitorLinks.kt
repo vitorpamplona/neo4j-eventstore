@@ -20,6 +20,23 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
+import com.vitorpamplona.quartz.nip01Core.tags.geohash.GeoHashTag
+import com.vitorpamplona.quartz.nip66RelayMonitor.discovery.RelayDiscoveryEvent
+import com.vitorpamplona.quartz.nip66RelayMonitor.discovery.tags.AcceptedKindTag
+import com.vitorpamplona.quartz.nip66RelayMonitor.monitor.RelayMonitorEvent
+
 /** Quartz's `nip66RelayMonitor` classes. */
 internal fun KindMappers.Builder.nip66RelayMonitor() {
+    /*
+     * NIP-66: the relay itself is this event's `d` (a URL, not linked); its topics, geohashes and
+     * accepted kinds are. A negated `k` is a kind the relay rejects, so it is not a `k` it has.
+     */
+    on<RelayDiscoveryEvent> { e ->
+        hashtags(e.tags)
+        each(e.tags, GeoHashTag::parse) { tag(Relation.TAG, GeoHashTag.TAG_NAME, it) }
+        each(e.tags, AcceptedKindTag::parse) { if (!it.negated) tag(Relation.TAG, AcceptedKindTag.TAG_NAME, it.kind.toString()) }
+    }
+    on<RelayMonitorEvent> { e -> each(e.tags, GeoHashTag::parse) { tag(Relation.TAG, GeoHashTag.TAG_NAME, it) } }
 }

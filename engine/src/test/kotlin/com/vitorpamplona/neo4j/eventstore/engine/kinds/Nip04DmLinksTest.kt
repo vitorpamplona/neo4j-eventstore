@@ -20,9 +20,33 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
-import com.vitorpamplona.quartz.nip42RelayAuth.RelayAuthEvent
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.quartz.nip04Dm.messages.EncryptedDmEvent
+import kotlin.test.Test
+import kotlin.test.assertEquals
 
-/** Quartz's `nip42RelayAuth` classes. */
-internal fun KindMappers.Builder.nip42RelayAuth() {
-    free<RelayAuthEvent>()
+class Nip04DmLinksTest {
+    @Test
+    fun encryptedDmLinksItsReceiverAndTheMessageItAnswers() {
+        val bob = "2".repeat(64)
+        val previous = "3".repeat(64)
+        val event =
+            EncryptedDmEvent(
+                "0".repeat(64),
+                "1".repeat(64),
+                1,
+                arrayOf(arrayOf("p", bob), arrayOf("e", previous)),
+                "ciphertext?iv=abc",
+                "0".repeat(128),
+            )
+        assertEquals(
+            listOf(
+                Link(Relation.RECIPIENT, LinkTarget.User(bob), "p"),
+                Link(Relation.PARENT, LinkTarget.Event(previous), "e"),
+            ),
+            event.links(),
+        )
+    }
 }

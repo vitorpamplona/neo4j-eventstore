@@ -20,6 +20,18 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
+import com.vitorpamplona.quartz.nip39ExtIdentities.ExternalIdentitiesEvent
+import com.vitorpamplona.quartz.nip39ExtIdentities.IdentityClaimTag
+
 /** Quartz's `nip39ExtIdentities` classes. */
 internal fun KindMappers.Builder.nip39ExtIdentities() {
+    /*
+     * NIP-39: each `i` is a `platform:identity` claim. [IdentityClaimTag] requires the proof the
+     * NIP makes mandatory and names known platforms in lowercase, so one identity is one node.
+     */
+    on<ExternalIdentitiesEvent> { e ->
+        each(e.tags, IdentityClaimTag::parse) { tag(Relation.TAG, IdentityClaimTag.TAG_NAME, it.platformIdentity()) }
+    }
 }

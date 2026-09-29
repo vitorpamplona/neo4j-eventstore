@@ -20,6 +20,17 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.quartz.nip01Core.tags.people.PTag
+import com.vitorpamplona.quartz.nip59Giftwrap.seals.SealEvent
+import com.vitorpamplona.quartz.nip59Giftwrap.wraps.GiftWrapEvent
+
 /** Quartz's `nip59Giftwrap` classes. */
 internal fun KindMappers.Builder.nip59Giftwrap() {
+    /*
+     * NIP-59: the wrap names only its recipient; the rumor inside is its own event once unwrapped.
+     * `EphemeralGiftWrapEvent` (21059) extends it and links alike.
+     */
+    on<GiftWrapEvent> { e -> user(Relation.RECIPIENT, e.recipientPubKey(), PTag.TAG_NAME) }
+    free<SealEvent>()
 }
