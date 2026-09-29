@@ -51,8 +51,10 @@ class FileCursorStore(
  * The reconciler's cadence (spec §7.2), cheapest-and-most-likely first:
  * 1. what the feed DROPPED (dirty hours, dropped removals);
  * 2. a rolling RECENT pass over the last [recentWindowSeconds];
- * 3. one step of a FULL sweep over the whole corpus, [sweepStepSeconds] of `created_at` per
- *    tick, resumable through [cursor] and wrapping around when it reaches now.
+ * 3. the FULL sweep over the whole corpus, resumable through [cursor], wrapping around at now.
+ *    Each tick spends a budget of [sweepIdsPerTick] source ids, not a fixed span of time: a
+ *    window with nothing in it widens the next one (×4, up to ten years), so the empty decades
+ *    before the first Nostr event cost a few queries instead of one tick per day.
  */
 class ReconcileLoop(
     private val reconciler: MirrorReconciler,
@@ -60,6 +62,7 @@ class ReconcileLoop(
     private val cursor: CursorStore? = null,
     private val recentWindowSeconds: Long = 2 * 3_600,
     private val sweepStepSeconds: Long = 86_400,
+    private val sweepIdsPerTick: Long = 250_000,
     private val sweepStart: Long = 0,
     private val nowSecs: () -> Long = { System.currentTimeMillis() / 1000 },
 ) {
@@ -81,11 +84,20 @@ class ReconcileLoop(
         val now = nowSecs()
         report += reconciler.reconcile(now - recentWindowSeconds, now + FUTURE_SLACK)
 
-        val from = sweepCursor
-        val to = minOf(from + sweepStepSeconds - 1, now)
-        report += reconciler.reconcile(from, to)
-        sweepCursor = if (to >= now) sweepStart else to + 1
-        cursor?.save(sweepCursor)
+        var spent = 0L
+        var step = sweepStepSeconds
+        while (spent < sweepIdsPerTick) {
+            val from = sweepCursor
+            val to = minOf(from + step - 1, now)
+            val window = reconciler.reconcile(from, to)
+            report += window
+            spent += window.sourceIds + 1 // +1: an empty window still costs its queries
+            step = if (window.sourceIds == 0L && window.extra == 0L) minOf(step * 4, MAX_EMPTY_STEP) else sweepStepSeconds
+            val wrapped = to >= now
+            sweepCursor = if (wrapped) sweepStart else to + 1
+            cursor?.save(sweepCursor)
+            if (wrapped) break
+        }
 
         last = report
         lastTickAt = now
@@ -108,5 +120,9 @@ class ReconcileLoop(
         // Events are accepted with created_at a little in the future (clock skew); the recent
         // pass reaches past now so those are not left to the full sweep.
         const val FUTURE_SLACK = 15 * 60L
+
+        // Ten years: a window this wide that DOES hold data is still bounded — the reconciler splits
+        // any window holding more than its maxWindowIds.
+        const val MAX_EMPTY_STEP = 10 * 365L * 86_400
     }
 }
