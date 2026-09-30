@@ -42,13 +42,21 @@ every port member, and `NoEmbeddedNeo4jTest` checks that no module links the GPL
 
 - **The graph is a projection.** Never write to Neo4j except through `GraphIndex`. A fix belongs
   in derivation plus a reconcile, not in hand-written Cypher.
+- **Bump `Derivation.VERSION` when an existing event would project differently**: a mapper fix,
+  a re-mapped relation, a new prop or curated value, a Quartz pin whose parsers read a tag
+  differently. Held events are never re-applied, so only the bump makes the reconciler re-derive
+  them. Forget it and they keep the old shape until a rebuild. A new kind's first mapper needs
+  no bump, but a bump is never wrong: it only costs a paced re-derive.
 - **Apply must stay order-independent.** Events arrive in any order and more than once. The slot
   rule (newest `created_at`, then lowest id), the `:Removed` fence and the stubs make that work.
   The unit convergence tests shuffle histories to prove it; keep them green.
 - **One write transaction per event.** Neo4j 2026.09 can fail a read of a node deleted earlier in
   the same transaction, instead of skipping it.
-- **A reconcile apply is authoritative**: it bypasses the fence and displaces the incumbent.
-  Without that, a stale slot whose winner sits in another window is never repaired.
+- **A reconcile apply is authoritative, as of its fetch.** It bypasses a fence older than the
+  fetch, and yields to one stamped after it (a removal the fetch missed). It still loses its slot
+  to a NIP-01 winner. The reconciler then asks the source about that winner, and unapplies it
+  only if the source dropped it. Without this, a stale slot whose winner sits in another window is
+  never repaired.
 - **Change `InMemoryGraphIndex` and `Neo4jGraphIndex` together.** `ProjectionIT` asserts that
   their dumps are equal.
 - **Relationship type names are API** (`docs/schema.md`). They are the vocabulary's relation

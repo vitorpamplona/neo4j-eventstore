@@ -68,8 +68,7 @@ class MirrorReconcilerTest {
         fail(diff)
     }
 
-    private suspend fun freshProjection(source: SimulatedSource) =
-        InMemoryGraphIndex().apply { apply(source.held.values.toList(), authoritative = true) }.dump()
+    private suspend fun freshProjection(source: SimulatedSource) = InMemoryGraphIndex().apply { apply(source.held.values.toList()) }.dump()
 
     @Test
     fun oneReconcileConvergesAnyInterleavingWithDrops() =

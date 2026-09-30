@@ -25,6 +25,9 @@ import com.vitorpamplona.neo4j.eventstore.engine.Fixtures.BOB
 import com.vitorpamplona.neo4j.eventstore.engine.Fixtures.CAROL
 import com.vitorpamplona.neo4j.eventstore.engine.Fixtures.event
 import com.vitorpamplona.neo4j.eventstore.engine.GraphDump
+import com.vitorpamplona.neo4j.eventstore.engine.derive.EdgeDeriver
+import com.vitorpamplona.neo4j.eventstore.engine.schema.Derivation
+import com.vitorpamplona.neo4j.eventstore.engine.schema.GraphPolicy
 import com.vitorpamplona.neo4j.eventstore.engine.schema.Labels
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -111,11 +114,81 @@ class InMemoryGraphIndexTest {
             val note = event(1, ALICE, content = "hi")
             graph.unapply(listOf(note.id))
             assertEquals(1, graph.apply(listOf(note)).fenced)
-            assertEquals(1, graph.apply(listOf(note), authoritative = true).applied)
+            assertEquals(1, graph.apply(listOf(note), authoritativeAsOf = now + 1).applied)
 
             graph.unapply(listOf(note.id))
             now += 3_601
             assertEquals(1, graph.apply(listOf(note)).applied, "fence window passed")
+        }
+
+    @Test
+    fun anAuthoritativeApplyIsFencedByARemovalAtOrAfterItsSourceRead() =
+        runTest {
+            // The reconciler read the source at `now`; the feed then removed the event: the
+            // removal is newer than the read, so the reconciler must not resurrect it.
+            val note = event(1, ALICE, content = "deleted after the read")
+            val readAt = now
+            graph.unapply(listOf(note.id))
+            assertEquals(1, graph.apply(listOf(note), authoritativeAsOf = readAt).fenced)
+            assertNull(graph.edgesOf(note.id))
+            // A read AFTER the removal (the source put it back since) is what the fence yields to.
+            assertEquals(1, graph.apply(listOf(note), authoritativeAsOf = readAt + 1).applied)
+        }
+
+    @Test
+    fun anAuthoritativeApplyKeepsAnIncumbentThatOutranksItAndSaysWhich() =
+        runTest {
+            val older = event(3, ALICE, listOf(listOf("p", BOB)), createdAt = 100)
+            val newer = event(3, ALICE, listOf(listOf("p", CAROL)), createdAt = 200)
+            graph.apply(listOf(newer))
+            val outcome = graph.apply(listOf(older), authoritativeAsOf = now)
+            assertEquals(1, outcome.stale)
+            assertEquals(mapOf(older.id to newer.id), outcome.outranked)
+            assertNotNull(graph.edgesOf(newer.id), "the newer version keeps its slot")
+            assertNull(graph.edgesOf(older.id))
+            assertEquals(emptyMap(), graph.apply(listOf(older)).outranked, "a live apply reports nothing")
+        }
+
+    @Test
+    fun authorNamesLandOnTheAuthorEdgesUserNotOnTheRawPubkey() =
+        runTest {
+            // The vocabulary lowercases the AUTHOR target; the names must follow it, not mint a
+            // second, edgeless `:User` under the uppercase spelling.
+            val upper = ALICE.uppercase()
+            val profile = event(0, upper, content = """{"name":"alice"}""")
+            graph.apply(listOf(profile))
+            val dump = graph.dump()
+            assertNull(dump.node(Labels.USER, upper), "no user under the raw pubkey")
+            assertEquals(mapOf<String, Any>("name" to "alice"), dump.node(Labels.USER, ALICE)!!.props)
+            graph.unapply(listOf(profile.id))
+            assertEquals(GraphDump(emptySet(), emptySet()), graph.dump(), "and they go with it")
+        }
+
+    @Test
+    fun rederiveRewritesAHeldEventWithTheRunningDerivationInPlace() =
+        runTest {
+            // An older build bounded tag values at 3 bytes, so it never linked the hashtag.
+            val oldPolicy = GraphPolicy(maxTagValueBytes = 3)
+            val old = InMemoryGraphIndex(EdgeDeriver(oldPolicy), nowSecs = { now })
+            val note = event(1, ALICE, listOf(listOf("t", "nostr"), listOf("p", BOB)), "hi #nostr")
+            val reply = event(1, BOB, listOf(listOf("e", note.id)), "reply")
+            old.apply(listOf(note, reply))
+            val upgraded = old.reopen(EdgeDeriver())
+
+            val stamps = HashMap<String, Long>()
+            upgraded.visitIds(0, Long.MAX_VALUE) { page ->
+                page.forEach { stamps[it.id] = it.derived }
+                true
+            }
+            assertEquals(setOf(Derivation.stamp(oldPolicy)), stamps.values.toSet(), "held as the older build stamped them")
+
+            val outcome = upgraded.rederive(listOf(note, event(1, CAROL, content = "never held")))
+            assertEquals(1, outcome.applied)
+            assertEquals(1, outcome.stale, "an event not held is left alone")
+            val fresh = InMemoryGraphIndex().apply { apply(listOf(note, reply)) }.dump()
+            val rederived = upgraded.rederive(listOf(reply)).let { upgraded.dump() }
+            assertEquals(fresh, rederived, "equal to a fresh projection by the running build")
+            assertTrue(upgraded.edgesOf(note.id)!!.any { it.targetLabel == Labels.TAG })
         }
 
     @Test

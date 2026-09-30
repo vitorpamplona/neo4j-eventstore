@@ -153,14 +153,25 @@ asks — about the person, or about their content? — is the relation itself:
 - `REPORTED`: the reported event, address or blob;
 - `REPORTED_AUTHOR`: the author of reported content (the report's `p` beside its `e` / `a` / `x`).
 
-Each carries `report` and `report_raw`. Relationship indexes cover `REPORTED_USER (report)`,
-`REPORTED_USER (report_raw)`, `REPORTED_AUTHOR (report)` and `REPORTED (report)`, so a report
-query that is not anchored on one user still seeks rather than scans.
+Each carries `report` and `report_raw`. Relationship indexes cover both properties on all three
+relations, so a report query that is not anchored on one user still seeks rather than scans.
 
 ### Internal labels
 
 `:Removed` (a short-lived fence of recently removed ids, swept after about two hours) and `:Meta`
 (the schema singleton) belong to the projection's bookkeeping. They are not part of this contract.
+Neither is the `derived` property on `:Stored` nodes: the stamp of the derivation that wrote the
+event. When a release changes what an event projects to, the reconciler rewrites each held event
+whose stamp differs, in place, over the following full sweep; until it reaches an event, that
+event still reads as the older release wrote it. `:Meta` records `schema_version`, `policy_hash`,
+`derivation_version` and the `derived` stamp the graph is converging to. A build refuses to start
+on a graph whose `schema_version` has another major.
+
+### Indexes
+
+Besides the four key constraints: `:Stored(created_at)`, `:Stored(kind)`, `:Stored(expires_at)`,
+`:User(nip05)`, `:Address(kind)`, and `report` / `report_raw` on `REPORTED_USER`, `REPORTED` and
+`REPORTED_AUTHOR`.
 
 ## Example queries
 

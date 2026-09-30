@@ -27,7 +27,6 @@ import com.vitorpamplona.quartz.nip01Core.core.Event
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -96,6 +95,9 @@ class GraphFeed(
     private val failures = AtomicLong()
 
     @Volatile private var oldestInFlight: Long = 0
+
+    // The batch the consumer is applying, for a drain that gives up on it (closeAndDrain).
+    @Volatile private var inFlight: Op? = null
 
     override fun onPut(events: List<Event>) {
         val admitted = if (policy.excludedKinds.isEmpty()) events else events.filter { policy.admits(it.kind) }
@@ -175,6 +177,7 @@ class GraphFeed(
                                     }
                                     batch += next.events
                                 }
+                                inFlight = Op.Put(batch, first.enqueuedAt)
                                 runOrMarkDirty({ batch.forEach { dirty.markCreatedAt(it.createdAt) } }) {
                                     val outcome = graph.apply(batch)
                                     appliedEvents.addAndGet(outcome.applied.toLong())
@@ -195,12 +198,14 @@ class GraphFeed(
                                     }
                                     batch += next.ids
                                 }
+                                inFlight = Op.Remove(batch, first.enqueuedAt)
                                 runOrMarkDirty({ dirty.markRemovals(batch) }) {
                                     graph.unapply(batch)
                                     removedIds.addAndGet(batch.size.toLong())
                                 }
                             }
                         }
+                        inFlight = null
                         oldestInFlight = 0
                     }
                 } finally {
@@ -234,12 +239,22 @@ class GraphFeed(
      * [close], then waits up to [timeoutMillis] for the consumer to apply what is queued. What it
      * cannot finish in time is marked dirty (to be saved by the caller) instead of vanishing
      * with the process.
+     *
+     * BOUNDED even when the graph hangs: the consumer is cancelled, but a graph call blocked in
+     * the driver (retrying against a server that is down) only sees that between events, so it
+     * gets [cancelGraceMillis] more and is then abandoned — its batch marked dirty here, which is
+     * idempotent with the consumer marking it again when it does unwind.
      */
-    suspend fun closeAndDrain(timeoutMillis: Long) {
+    suspend fun closeAndDrain(
+        timeoutMillis: Long,
+        cancelGraceMillis: Long = 1_000,
+    ) {
         queue.close()
         val job = consumer ?: return
         if (withTimeoutOrNull(timeoutMillis) { job.join() } == null) {
-            job.cancelAndJoin()
+            job.cancel()
+            withTimeoutOrNull(cancelGraceMillis) { job.join() }
+            inFlight?.let { markDirty(it) }
             while (true) markDirty(receiveNow() ?: break)
         }
     }

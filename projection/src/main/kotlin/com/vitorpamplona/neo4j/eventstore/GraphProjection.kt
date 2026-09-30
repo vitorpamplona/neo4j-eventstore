@@ -85,32 +85,29 @@ class GraphProjection private constructor(
 
     /**
      * The live schema view behind `GET /graph/schema` (spec §8.6): version, labels and
-     * relationship types with counts (each an O(1) count-store read), every relation the
-     * vocabulary can write (a type with no edges yet is absent from the counts), and the policy.
+     * relationship types with counts, every relation the vocabulary can write (a type with no
+     * edges yet is absent from the counts), and the policy.
+     *
+     * ONE statement ([SCHEMA_COUNTS]) on the callers' connection pool, answered from the count
+     * store — where it used to be one round trip per label and type, ~180 in all, on the writer's
+     * pool. A relay caches the answer (vespa-relay's `SchemaCache`).
      */
     suspend fun schema(): JsonObject =
         withContext(Dispatchers.IO) {
-            driver.session(SessionConfig.forDatabase(database)).use { session ->
-                val meta = SchemaInstaller(driver, database).meta() ?: emptyMap()
-                val labels =
-                    listOf(Labels.EVENT, Labels.STORED, Labels.USER, Labels.ADDRESS, Labels.TAG).associateWith { label ->
-                        session.run("MATCH (n:$label) RETURN count(n) AS c").single()["c"].asLong()
-                    }
-                val types =
-                    session
-                        .run("CALL db.relationshipTypes() YIELD relationshipType RETURN relationshipType")
-                        .list { it["relationshipType"].asString() }
-                        .filter { RelTypes.isSafe(it) }
-                        .sorted()
-                        .associateWith { type -> session.run("MATCH ()-[r:$type]->() RETURN count(r) AS c").single()["c"].asLong() }
+            cypherDriver.session(SessionConfig.forDatabase(database)).use { session ->
+                val row = session.executeRead { tx -> tx.run(SCHEMA_COUNTS).single() }
+                val version = row["version"].takeUnless { it.isNull }?.asObject()?.toString()
+                val labels = row["labels"].asMap { it.asLong() }.toSortedMap()
+                val types = row["types"].asMap { it.asLong() }.filterValues { it > 0 }.toSortedMap()
                 JsonObject(
                     mapOf(
-                        "schema_version" to JsonPrimitive(meta["schema_version"]?.toString() ?: SchemaInstaller.SCHEMA_VERSION),
+                        "schema_version" to JsonPrimitive(version ?: SchemaInstaller.SCHEMA_VERSION),
                         "policy" to
                             JsonObject(
                                 mapOf(
                                     "hash" to JsonPrimitive(policy.hash()),
                                     "max_tag_value_bytes" to JsonPrimitive(policy.maxTagValueBytes),
+                                    "max_curated_bytes" to JsonPrimitive(policy.maxCuratedBytes),
                                     "excluded_kinds" to JsonArray(policy.excludedKinds.sorted().map { JsonPrimitive(it) }),
                                 ),
                             ),
@@ -123,11 +120,17 @@ class GraphProjection private constructor(
         }
 
     /**
-     * Drains the feed (up to [DRAIN_TIMEOUT_MILLIS]), saves what is still owed to the dirty file,
-     * then closes. Close the SOURCE first: a write it reports after this is only counted.
+     * Stops the reconcile loop [ReconcileLoop.start] launched (it puts back the dirty work its
+     * tick drained), drains the feed (up to [DRAIN_TIMEOUT_MILLIS]), saves what is still owed to
+     * the dirty file, then closes. Close the SOURCE first: a write it reports after this is only
+     * counted. An embedder that calls [ReconcileLoop.tick] itself must stop doing so before this.
      */
     override fun close() {
-        runBlocking { feed.closeAndDrain(DRAIN_TIMEOUT_MILLIS) }
+        runBlocking {
+            // First: it holds the graph's write lock between events, and the drain needs it.
+            reconcileLoop.stop(RECONCILE_STOP_MILLIS)
+            feed.closeAndDrain(DRAIN_TIMEOUT_MILLIS)
+        }
         dirtyFile?.let { runCatching { dirty.save(it) } }
         scope.cancel()
         index.close()
@@ -139,6 +142,31 @@ class GraphProjection private constructor(
 
     companion object {
         const val DRAIN_TIMEOUT_MILLIS = 10_000L
+        const val RECONCILE_STOP_MILLIS = 10_000L
+
+        /**
+         * One row: `:Meta`'s `version`, and maps of `labels` and vocabulary `types` to counts. Each
+         * `COUNT { }` over one bare label or type is planned as a count-store read
+         * (NodeCountFromCountStore / RelationshipCountFromCountStore) — measured on 2026.09 that
+         * holds in map projections, but NOT in a `UNION ALL` of `RETURN 'x' AS k, count(n)`
+         * branches, which the planner turns into label and type scans (`GraphProjectionIT`
+         * walks the plan).
+         */
+        val SCHEMA_COUNTS: String =
+            run {
+                val labels =
+                    listOf(Labels.EVENT, Labels.STORED, Labels.USER, Labels.ADDRESS, Labels.TAG)
+                        .joinToString(", ") { "$it: COUNT { (:$it) }" }
+                val types =
+                    Relation.ALL
+                        .map { it.name }
+                        .filter { RelTypes.isSafe(it) }
+                        .distinct()
+                        .sorted()
+                        .joinToString(", ") { "$it: COUNT { ()-[:$it]->() }" }
+                "OPTIONAL MATCH (m:${Labels.META} {singleton: true}) WITH m.schema_version AS version LIMIT 1 " +
+                    "RETURN version, {$labels} AS labels, {$types} AS types"
+            }
 
         /**
          * Connects, installs the schema (idempotent), checks the server is safe to expose to

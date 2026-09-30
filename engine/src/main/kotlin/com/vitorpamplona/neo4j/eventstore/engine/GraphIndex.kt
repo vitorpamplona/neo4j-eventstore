@@ -21,7 +21,6 @@
 package com.vitorpamplona.neo4j.eventstore.engine
 
 import com.vitorpamplona.quartz.nip01Core.core.Event
-import com.vitorpamplona.quartz.nip01Core.store.IdAndTime
 
 /**
  * The graph port: what the projection does to a graph, independent of where the graph lives.
@@ -40,32 +39,49 @@ import com.vitorpamplona.quartz.nip01Core.store.IdAndTime
  * Two residuals no local rule can see, both left to the reconciler: a remove arriving more than
  * a fence window before its own put; and, when the source supersedes WITHOUT reporting the
  * loser, a stale version delivered after its successor was itself removed (the slot looks
- * empty). The reconciler repairs them with AUTHORITATIVE applies: the source says the event is
- * held, so it bypasses the fence and displaces whatever occupies its slot.
+ * empty). The reconciler repairs them with AUTHORITATIVE applies (the source said the event was
+ * held when it read it), and removes a held incumbent that out-ranks an authoritative apply only
+ * once the source confirms it no longer holds it ([ApplyOutcome.outranked]).
  */
 interface GraphIndex : AutoCloseable {
     /**
-     * Projects [events]; see the contract. [authoritative] (the reconciler: the source holds these
-     * NOW) bypasses the recent-removal fence and displaces a slot's incumbent whatever its age.
+     * Projects [events]; see the contract.
+     *
+     * [authoritativeAsOf] is the reconciler's: the source held these events when it was read at
+     * that second. Such an apply bypasses the recent-removal fence — unless the fence was stamped
+     * AT OR AFTER the read: that removal is newer than what the source said, and re-applying
+     * would resurrect an event the source has since dropped. It still respects NIP-01 in its slot:
+     * an incumbent that out-ranks it is kept (the source may hold it too, having superseded this
+     * one since the read) and reported in [ApplyOutcome.outranked] for the caller to check.
      */
     suspend fun apply(
         events: List<Event>,
-        authoritative: Boolean = false,
+        authoritativeAsOf: Long? = null,
     ): ApplyOutcome
 
     /** Unprojects [ids] (the stub rule of spec §4.1) and fences each id against a late re-put. */
     suspend fun unapply(ids: List<String>)
 
     /**
+     * Rewrites the projection of each HELD event among [events] with the running derivation —
+     * what the reconciler does to an event whose [HeldRef.derived] stamp is stale (a mapper fix, a
+     * Quartz bump). In place and in one transaction per event: its old edges are unapplied,
+     * keeping every node the new derivation references (no delete-and-re-create), and the new
+     * ones written. No fence and no slot contest: the event is held and stays held. An event not
+     * held (removed meanwhile) is left alone and counted [ApplyOutcome.stale].
+     */
+    suspend fun rederive(events: List<Event>): ApplyOutcome
+
+    /**
      * Every held (`:Stored`) event with `created_at` in `[since, until]`, ascending by
-     * (created_at, id), in pages — the reconciler's side of the diff. [onPage] returns whether to
-     * continue.
+     * (created_at, id), in pages, each with the derivation stamp it was written with — the
+     * reconciler's side of the diff. [onPage] returns whether to continue.
      */
     suspend fun visitIds(
         since: Long,
         until: Long,
         pageSize: Int = 10_000,
-        onPage: suspend (List<IdAndTime>) -> Boolean,
+        onPage: suspend (List<HeldRef>) -> Boolean,
     )
 
     /** What held event [id] contributed, sorted; null when it is not held. Debugging and parity. */
@@ -81,6 +97,17 @@ interface GraphIndex : AutoCloseable {
     suspend fun dump(): GraphDump
 }
 
+/**
+ * A held event as [GraphIndex.visitIds] lists it: its (created_at, id) and the derivation stamp it
+ * was written with ([com.vitorpamplona.neo4j.eventstore.engine.schema.Derivation.stamp]; 0 for a
+ * node written before stamps existed).
+ */
+data class HeldRef(
+    val createdAt: Long,
+    val id: String,
+    val derived: Long,
+)
+
 /** Per-call tallies of what [GraphIndex.apply] did with each event. */
 data class ApplyOutcome(
     val applied: Int = 0,
@@ -94,6 +121,12 @@ data class ApplyOutcome(
      * transient failure (the server down, retries exhausted) throws instead.
      */
     val failed: List<Event> = emptyList(),
+    /**
+     * Authoritative applies only: event id → the held incumbent that out-ranked it under NIP-01
+     * and was kept. The caller asks the source about each incumbent: if it is no longer held, it
+     * unapplies it and applies the event again.
+     */
+    val outranked: Map<String, String> = emptyMap(),
 ) {
     operator fun plus(o: ApplyOutcome) =
         ApplyOutcome(
@@ -103,6 +136,7 @@ data class ApplyOutcome(
             fenced + o.fenced,
             excluded + o.excluded,
             if (o.failed.isEmpty()) failed else failed + o.failed,
+            if (o.outranked.isEmpty()) outranked else outranked + o.outranked,
         )
 }
 

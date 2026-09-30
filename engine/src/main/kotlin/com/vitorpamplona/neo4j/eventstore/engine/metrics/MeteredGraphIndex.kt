@@ -24,8 +24,8 @@ import com.vitorpamplona.neo4j.eventstore.engine.ApplyOutcome
 import com.vitorpamplona.neo4j.eventstore.engine.EdgeView
 import com.vitorpamplona.neo4j.eventstore.engine.GraphDump
 import com.vitorpamplona.neo4j.eventstore.engine.GraphIndex
+import com.vitorpamplona.neo4j.eventstore.engine.HeldRef
 import com.vitorpamplona.quartz.nip01Core.core.Event
-import com.vitorpamplona.quartz.nip01Core.store.IdAndTime
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.cancellation.CancellationException
@@ -74,17 +74,51 @@ class MeteredGraphIndex(
 
     override suspend fun apply(
         events: List<Event>,
-        authoritative: Boolean,
-    ): ApplyOutcome = timed("apply") { inner.apply(events, authoritative) }
+        authoritativeAsOf: Long?,
+    ): ApplyOutcome = timed("apply") { inner.apply(events, authoritativeAsOf) }
 
     override suspend fun unapply(ids: List<String>) = timed("unapply") { inner.unapply(ids) }
 
+    override suspend fun rederive(events: List<Event>): ApplyOutcome = timed("rederive") { inner.rederive(events) }
+
+    /**
+     * Times the PAGE FETCHES only: [onPage] is the caller's work (the reconciler diffing, even
+     * fetching from the source and applying), and counting it as graph latency would make a slow
+     * source look like a slow graph.
+     */
     override suspend fun visitIds(
         since: Long,
         until: Long,
         pageSize: Int,
-        onPage: suspend (List<IdAndTime>) -> Boolean,
-    ) = timed("visitIds") { inner.visitIds(since, until, pageSize, onPage) }
+        onPage: suspend (List<HeldRef>) -> Boolean,
+    ) {
+        var callbackNanos = 0L
+        var callbackThrew = false
+        val meter = meters.getOrPut("visitIds") { Meter() }
+        val started = System.nanoTime()
+        try {
+            inner.visitIds(since, until, pageSize) { page ->
+                val t = System.nanoTime()
+                try {
+                    onPage(page)
+                } catch (e: Throwable) {
+                    callbackThrew = true
+                    throw e
+                } finally {
+                    callbackNanos += System.nanoTime() - t
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // The caller's own failure is not the graph's.
+            if (!callbackThrew) meter.failures.incrementAndGet()
+            throw e
+        } finally {
+            meter.calls.incrementAndGet()
+            meter.nanos.addAndGet(System.nanoTime() - started - callbackNanos)
+        }
+    }
 
     override suspend fun edgesOf(id: String): List<EdgeView>? = timed("edgesOf") { inner.edgesOf(id) }
 

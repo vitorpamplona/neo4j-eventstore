@@ -21,6 +21,7 @@
 package com.vitorpamplona.neo4j.eventstore.engine.derive
 
 import com.vitorpamplona.neo4j.eventstore.engine.schema.Labels
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
 import com.vitorpamplona.quartz.nip01Core.core.Address
 
 /** The four kinds of node an edge can point at, with the label each is stored under. */
@@ -76,7 +77,16 @@ data class GraphDoc(
     val slot: Slot?,
     val edges: List<EdgeDoc>,
     val authorProps: Map<String, String>? = null,
-)
+) {
+    /**
+     * The key of the `:User` this event's `AUTHOR` edge points at, or null when it has none (a
+     * pubkey that is not 64-hex). Curated author values ([authorProps]) are set on THIS node,
+     * never on the raw [pubkey]: an uppercase pubkey is lowercased by the vocabulary, so keying on
+     * the raw string would miss the author in Neo4j and mint an orphan `:User` in memory.
+     */
+    val authorKey: String?
+        get() = edges.firstOrNull { it.type == Relation.AUTHOR.name && it.target.kind == NodeKind.USER }?.target?.key
+}
 
 /** An `:Address` node's properties, recovered from its id (`kind:pubkey:d`). */
 data class AddressKey(

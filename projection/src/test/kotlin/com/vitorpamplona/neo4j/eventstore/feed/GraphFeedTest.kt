@@ -26,7 +26,16 @@ import com.vitorpamplona.neo4j.eventstore.engine.memory.InMemoryGraphIndex
 import com.vitorpamplona.neo4j.eventstore.reconcile.DirtyTracker
 import com.vitorpamplona.neo4j.eventstore.sim.GraphCorpus
 import com.vitorpamplona.quartz.nip01Core.core.Event
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -103,7 +112,7 @@ class GraphFeedTest {
                 object : GraphIndex by InMemoryGraphIndex() {
                     override suspend fun apply(
                         events: List<Event>,
-                        authoritative: Boolean,
+                        authoritativeAsOf: Long?,
                     ) = ApplyOutcome(failed = events)
                 }
             val feed = GraphFeed(refusing, dirty)
@@ -112,5 +121,38 @@ class GraphFeedTest {
             feed.start(this).join()
             assertEquals(1, dirty.pendingHours())
             assertEquals(1L, feed.stats().failures)
+        }
+
+    @Test
+    fun aDrainIsBoundedEvenWhenTheGraphIgnoresCancellation(): Unit =
+        runBlocking {
+            // A graph call blocked in the driver, retrying against a server that is down: it sees
+            // no cancellation until it returns.
+            val release = CountDownLatch(1)
+            val hung =
+                object : GraphIndex by InMemoryGraphIndex() {
+                    override suspend fun apply(
+                        events: List<Event>,
+                        authoritativeAsOf: Long?,
+                    ): ApplyOutcome =
+                        withContext(Dispatchers.IO) {
+                            release.await(30, TimeUnit.SECONDS)
+                            ApplyOutcome(applied = events.size)
+                        }
+                }
+            val dirty = DirtyTracker()
+            val feed = GraphFeed(hung, dirty)
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+            feed.start(scope)
+            val corpus = GraphCorpus(9)
+            feed.onPut(listOf(corpus.next()))
+            delay(100) // the consumer is now inside the hung apply
+            val started = System.nanoTime()
+            feed.closeAndDrain(timeoutMillis = 200, cancelGraceMillis = 200)
+            val tookMillis = (System.nanoTime() - started) / 1_000_000
+            release.countDown()
+            scope.cancel()
+            assertTrue(tookMillis < 5_000, "the drain waited $tookMillis ms on a hung graph")
+            assertEquals(1, dirty.pendingHours(), "the abandoned batch is owed")
         }
 }

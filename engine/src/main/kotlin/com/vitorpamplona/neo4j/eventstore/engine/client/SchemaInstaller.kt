@@ -20,6 +20,7 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.client
 
+import com.vitorpamplona.neo4j.eventstore.engine.schema.Derivation
 import com.vitorpamplona.neo4j.eventstore.engine.schema.GraphPolicy
 import com.vitorpamplona.neo4j.eventstore.engine.schema.Labels
 import org.neo4j.driver.Driver
@@ -27,8 +28,14 @@ import org.neo4j.driver.SessionConfig
 
 /**
  * Creates the constraints and indexes the projection relies on (spec §4.1) and records what the
- * graph was built with in the `:Meta` singleton. Idempotent — safe on every boot — and run after
- * a bulk import, which loads data without them.
+ * graph is being converged to in the `:Meta` singleton. Idempotent — safe on every boot — and run
+ * after a bulk import, which loads data without them.
+ *
+ * `:Meta` records the schema version, the policy hash and the derivation stamp ([Derivation]). A
+ * graph whose recorded MAJOR differs is REFUSED: its relationship types are not this build's, and
+ * applying on top would leave a graph of two vocabularies. Anything else is recorded over — a
+ * changed stamp needs no flag, since every held node carries the stamp it was written with and
+ * the reconciler re-derives those that differ.
  *
  * The uniqueness constraints are not just integrity: every `MERGE` on a key is an index seek
  * through them, and they serialize concurrent writers creating the same node.
@@ -42,13 +49,34 @@ class SchemaInstaller(
         awaitSeconds: Long = 600,
     ) {
         driver.session(SessionConfig.forDatabase(database)).use { session ->
+            // Before touching anything: a refused graph is left exactly as it was found.
+            val recorded =
+                session
+                    .run("MATCH (m:${Labels.META} {singleton: true}) RETURN m.schema_version AS v")
+                    .list()
+                    .firstOrNull()
+                    ?.get("v")
+                    ?.takeUnless { it.isNull }
+                    ?.asObject()
+                    ?.toString()
+            check(recorded == null || Derivation.major(recorded) == Derivation.major(SCHEMA_VERSION)) {
+                "the graph in database '$database' was built with schema $recorded; this build writes $SCHEMA_VERSION. " +
+                    "A major version renames or removes relationship types, which re-deriving cannot migrate: " +
+                    "rebuild the graph (bulk import) or point this build at an empty database."
+            }
             STATEMENTS.forEach { session.run(it).consume() }
             session.run("CALL db.awaitIndexes(\$seconds)", mapOf("seconds" to awaitSeconds)).consume()
             session
                 .run(
                     "MERGE (m:${Labels.META} {singleton: true}) " +
-                        "SET m.schema_version = \$schema, m.policy_hash = \$policy REMOVE m.kind_registry_version",
-                    mapOf("schema" to SCHEMA_VERSION, "policy" to policy.hash()),
+                        "SET m.schema_version = \$schema, m.policy_hash = \$policy, " +
+                        "m.derivation_version = \$version, m.${Derivation.PROPERTY} = \$stamp",
+                    mapOf(
+                        "schema" to SCHEMA_VERSION,
+                        "policy" to policy.hash(),
+                        "version" to Derivation.VERSION.toLong(),
+                        "stamp" to Derivation.stamp(policy),
+                    ),
                 ).consume()
         }
     }
@@ -67,12 +95,8 @@ class SchemaInstaller(
     companion object {
         const val DEFAULT_DATABASE = "neo4j"
 
-        /**
-         * The public schema version (spec §8.6): minor for additive changes, major for renames and
-         * removals. 2.0: relationship types are the vocabulary's relations (`REPLY`-style names,
-         * `docs/vocabulary.md`), no longer `<tag>_<kind>`.
-         */
-        const val SCHEMA_VERSION = "2.0"
+        /** The public schema version; defined, with what a major change means, at [Derivation.SCHEMA_VERSION]. */
+        const val SCHEMA_VERSION = Derivation.SCHEMA_VERSION
 
         val STATEMENTS =
             listOf(
@@ -86,6 +110,9 @@ class SchemaInstaller(
                 "CREATE INDEX stored_kind IF NOT EXISTS FOR (n:${Labels.STORED}) ON (n.kind)",
                 "CREATE INDEX stored_expires_at IF NOT EXISTS FOR (n:${Labels.STORED}) ON (n.expires_at)",
                 "CREATE INDEX user_nip05 IF NOT EXISTS FOR (n:${Labels.USER}) ON (n.nip05)",
+                // "Every long-form article address", "every community": an address is keyed by
+                // its id, and without this a kind filter scans every address.
+                "CREATE INDEX address_kind IF NOT EXISTS FOR (n:${Labels.ADDRESS}) ON (n.kind)",
                 "CREATE INDEX removed_at IF NOT EXISTS FOR (n:${Labels.REMOVED}) ON (n.at)",
                 // Report queries filter the report edges themselves ("impersonation reports",
                 // "everything but the invented types"): relationship indexes let a query that is
@@ -93,7 +120,9 @@ class SchemaInstaller(
                 "CREATE INDEX reported_user_type IF NOT EXISTS FOR ()-[r:REPORTED_USER]-() ON (r.report)",
                 "CREATE INDEX reported_user_raw IF NOT EXISTS FOR ()-[r:REPORTED_USER]-() ON (r.report_raw)",
                 "CREATE INDEX reported_author_type IF NOT EXISTS FOR ()-[r:REPORTED_AUTHOR]-() ON (r.report)",
+                "CREATE INDEX reported_author_raw IF NOT EXISTS FOR ()-[r:REPORTED_AUTHOR]-() ON (r.report_raw)",
                 "CREATE INDEX reported_type IF NOT EXISTS FOR ()-[r:REPORTED]-() ON (r.report)",
+                "CREATE INDEX reported_raw IF NOT EXISTS FOR ()-[r:REPORTED]-() ON (r.report_raw)",
             )
     }
 }

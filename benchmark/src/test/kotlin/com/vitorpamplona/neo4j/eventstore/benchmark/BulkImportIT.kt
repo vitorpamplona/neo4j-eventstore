@@ -70,7 +70,15 @@ class BulkImportIT {
             val named = hex("named")
             val stale = Event(hex("stale0"), named, 1_600_000_000, 0, emptyArray(), "{\"name\":\"old\"}", SIG)
             source.put(Event(hex("current0"), named, 1_700_000_000, 0, emptyArray(), "{\"name\":\"new\"}", SIG))
-            val events = listOf(stale) + source.held.values.toList()
+            // Another slot the dump caught twice. Online, a version older than its winner must be
+            // stale (compared against the WINNER, not whichever version the slot lookup returned
+            // first), and a newer one must displace BOTH.
+            val listed = hex("listed")
+            val listA = Event(hex("listA"), listed, 1_600_000_000, 3, arrayOf(arrayOf("p", hex("x"))), "", SIG)
+            val listB = Event(hex("listB"), listed, 1_650_000_000, 3, arrayOf(arrayOf("p", hex("y"))), "", SIG)
+            val listMiddle = Event(hex("listMiddle"), listed, 1_620_000_000, 3, arrayOf(arrayOf("p", hex("z"))), "", SIG)
+            val listNewest = Event(hex("listNewest"), listed, 1_690_000_000, 3, arrayOf(arrayOf("p", hex("w"))), "", SIG)
+            val events = listOf(stale, listA, listB) + source.held.values.toList()
 
             // World-readable: the server image imports as its own `neo4j` user.
             val dir =
@@ -110,9 +118,14 @@ class BulkImportIT {
                     BulkImport.finalize(driver)
 
                     val graph = Neo4jGraphIndex(driver)
+                    assertEquals(1, graph.apply(listOf(listMiddle)).stale, "older than the slot's winner")
+                    source.put(listNewest)
+                    assertEquals(1, graph.apply(listOf(listNewest)).applied)
+                    assertEquals(null, graph.edgesOf(listA.id), "every loser displaced")
+                    assertEquals(null, graph.edgesOf(listB.id), "every loser displaced")
                     val report = MirrorReconciler(source, graph).reconcile(Long.MIN_VALUE, Long.MAX_VALUE)
                     assertEquals(1L, report.extra, "the stale kind 0 is the one extra")
-                    val expected = InMemoryGraphIndex().apply { apply(source.held.values.toList(), authoritative = true) }.dump()
+                    val expected = InMemoryGraphIndex().apply { apply(source.held.values.toList()) }.dump()
                     val actual = graph.dump()
                     assertEquals("new", actual.nodes.single { it.key == named }.props["name"])
                     assertEquals(expected.nodes.size, actual.nodes.size, "node count")

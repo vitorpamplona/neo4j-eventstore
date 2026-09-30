@@ -24,6 +24,7 @@ import com.vitorpamplona.neo4j.eventstore.engine.derive.AddressKey
 import com.vitorpamplona.neo4j.eventstore.engine.derive.EdgeDeriver
 import com.vitorpamplona.neo4j.eventstore.engine.derive.Extractors
 import com.vitorpamplona.neo4j.eventstore.engine.derive.NodeKind
+import com.vitorpamplona.neo4j.eventstore.engine.schema.Derivation
 import com.vitorpamplona.neo4j.eventstore.engine.schema.Labels
 import com.vitorpamplona.neo4j.eventstore.engine.schema.RelTypes
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.PropType
@@ -49,6 +50,10 @@ class BulkCsvWriter(
     private val deriver: EdgeDeriver = EdgeDeriver(),
 ) : AutoCloseable {
     private val files = LinkedHashMap<String, BufferedWriter>()
+
+    // Every held node carries the derivation it was written with, exactly as an online apply's
+    // does (Derivation): a bulk-loaded graph is re-derived by the same reconciler rule.
+    private val stamp = Derivation.stamp(deriver.policy)
     var events = 0L
         private set
 
@@ -75,7 +80,7 @@ class BulkCsvWriter(
 
         out(
             STORED,
-            "id:ID(Event),kind:long,created_at:long,d,expires_at:long,content,msats:long,title,name,display_name,nip05,:LABEL",
+            "id:ID(Event),kind:long,created_at:long,${Derivation.PROPERTY}:long,d,expires_at:long,content,msats:long,title,name,display_name,nip05,:LABEL",
         ).apply {
             val p = doc.nodeProps
             write(
@@ -83,6 +88,7 @@ class BulkCsvWriter(
                     q(doc.id),
                     n(doc.kind),
                     n(doc.createdAt),
+                    n(stamp),
                     q(p["d"] as String?),
                     n(p["expires_at"]),
                     q(p[Extractors.CONTENT] as String?),
@@ -96,9 +102,12 @@ class BulkCsvWriter(
             )
             newLine()
         }
-        doc.authorProps?.let { props ->
+        // Keyed on the AUTHOR edge's target, as the online apply does (GraphDoc.authorKey).
+        val author = doc.authorKey
+        val props = doc.authorProps
+        if (props != null && author != null) {
             out(USERS_NAMED, "pubkey:ID(User),name,display_name,nip05").apply {
-                write(listOf(q(doc.pubkey), q(props["name"]), q(props["display_name"]), q(props["nip05"])).joinToString(","))
+                write(listOf(q(author), q(props["name"]), q(props["display_name"]), q(props["nip05"])).joinToString(","))
                 newLine()
             }
         }

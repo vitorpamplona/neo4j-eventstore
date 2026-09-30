@@ -211,12 +211,12 @@ Consequences:
 
 | Label | Key (unique constraint) | Properties | Exists when |
 |---|---|---|---|
-| `:Event:Stored` | `id` | `kind`, `created_at`, `d` (addressables), `expires_at` (NIP-40), curated values (§4.3) | Vespa holds the event |
+| `:Event:Stored` | `id` | `kind`, `created_at`, `d` (addressables), `expires_at` (NIP-40), curated values (§4.3), `derived` (the derivation stamp, §7.2) | Vespa holds the event |
 | `:Event` (stub) | `id` | none | Something references an id we do not hold (never seen, excluded, or removed) |
 | `:User` | `pubkey` | curated values from kind 0 (§4.3) | It authored, or was referenced |
 | `:Address` | `id` = `kind:pubkey:d` (Quartz `AddressSerializer` form) | `kind`, `pubkey`, `d` | Any **addressable** event (30000–39999), or a reference to any address, including a replaceable one such as `10002:<pk>:` |
 | `:Tag` | `key` = `name:value` | `name`, `value` | A value a kind's mapper links that is not an event, user or address: a hashtag, a URL, an external id, a group id (§5) |
-| `:Meta` | singleton | `schema_version`, `policy_hash` | Written by `SchemaInstaller` |
+| `:Meta` | singleton | `schema_version`, `policy_hash`, `derivation_version`, `derived` | Written by `SchemaInstaller` |
 
 - **The author is an edge, not a property.** An event's author is its `AUTHOR` edge. Dropping a
   64-character `pubkey` string from 500M nodes saves roughly 40–50 GB. The edge is also the
@@ -235,14 +235,18 @@ Consequences:
   2. drop `:Stored`;
   3. delete the node if nothing points at it any more, otherwise keep it as a stub.
 
-  Nodes left with no relationships (`:User`, `:Address`, `:Tag`, stubs) are removed by a
-  periodic `sweepOrphans()`.
+  Every node the unapply leaves without relationships (`:User`, `:Address`, `:Tag`, stubs) is
+  deleted in the same transaction. *Built:* there is no periodic orphan sweep, because none
+  leaks: each drop LOCKS the node, then tests `NOT EXISTS { … }`, so a concurrent writer's new
+  edge is either seen (the node stays) or waits for the delete to commit and re-creates the node.
 
 **Indexes:**
 - the four uniqueness constraints;
 - range indexes on `:Stored(created_at)` (the reconciler's windows) and `:Stored(kind)`;
 - `:Stored(expires_at)`;
-- `:User(nip05)`.
+- `:User(nip05)`, `:Address(kind)`;
+- relationship indexes on `report` and `report_raw` of `REPORTED_USER`, `REPORTED` and
+  `REPORTED_AUTHOR`.
 
 ### 4.2 Relationships
 
@@ -294,10 +298,11 @@ report's category, an assertion's rank, a zap's amount) ride that edge as the re
 | 9734 / 9321 / 8333 / 9736 | the event | `msats` where the kind states an amount |  |
 | 30023, 30311, 34550 | the event | `title` (≤ 256 bytes) | the `title` tag |
 
-Adding an extractor is an additive schema change, but it reaches only events applied after it
-ships. The reconciler diffs id sets, so it never re-derives an event the graph already holds.
-Until a re-derive pass exists, a graph built before the change gets the value only by a rebuild
-(bulk re-import).
+Adding an extractor is an additive schema change. *Built:* it reaches events already held
+through re-derivation (§7.2): every `:Stored` node carries the derivation stamp it was written
+with, and bumping `Derivation.VERSION` with the change makes the reconciler rewrite each held
+event in place, paced by the full sweep. The same holds for a mapper fix or a Quartz bump that
+changes a parse.
 
 ### 4.4 Kind policy (`schema/GraphPolicy`)
 
@@ -453,6 +458,9 @@ processes cannot both win a slot.
    - If the incumbent wins under NIP-01 (higher `created_at`, then the lower id), skip `e`: it
      is a stale delivery.
    - Otherwise, unapply the incumbent in the same transaction.
+   - *Built:* after a bulk load one slot can hold several versions until the reconciler removes
+     the losers. They are read winner first (`created_at DESC, id ASC`); `e` is compared with
+     the winner and, if it wins, unapplies them all.
 3. If `e`'s id was **unapplied within the last hour** (the recent-removal table, below), skip
    it. It is a late put racing its own removal.
 4. Write the node (promoting a stub if one exists), its edges (its `ADDRESS` among them), each
@@ -484,6 +492,9 @@ repairs that as an "extra".
 - **If the graph refuses one event** (a non-transient client error), that event alone is
   isolated (`ApplyOutcome.failed`) and marked dirty; the rest of its batch applies.
 - **On shutdown** the feed drains for up to 10 s; whatever is left is marked dirty and saved.
+  *Built:* the bound holds while Neo4j is down. The apply loop checks cancellation between
+  events, and a batch still blocked in the driver after a 1 s grace is abandoned and marked
+  dirty.
 - The queue is bounded in events and ids (default 100k), not in calls, because one sync call
   can carry thousands of events.
 
@@ -494,7 +505,7 @@ anyway.
 
 Forward the relay's **accepted events** and filter deletes from an `IEventStore` decorator, and
 re-apply NIP-09 / NIP-62 in the projector. The graph makes these cheap:
-- "is this deleted?" is `EXISTS { (:Stored {kind:5})-[:e_5|a_5]->(target) }` with the same
+- "is this deleted?" is `EXISTS { (:Stored {kind:5})-[:DELETED]->(target) }` with the same
   author;
 - vanish is an author-scoped unapply.
 
@@ -509,10 +520,16 @@ removals (sweeps, purges). It also requires fixing the relay's `as? VespaEventSt
 
 ```kotlin
 interface SourceOfTruth {                  // vespa-relay implements it over VespaEventStore.engine
-    suspend fun visitIds(since: Long, until: Long, onPage: suspend (List<IdKindTime>) -> Boolean)
+    suspend fun visitIds(since: Long, until: Long, onPage: suspend (List<IdAndTime>) -> Boolean)
+    suspend fun visitRefs(since: Long, until: Long, onPage: suspend (List<SourceRef>) -> Boolean) // default: kind unknown
     suspend fun fetch(ids: List<String>): List<Event>
 }
 ```
+
+*Built:* `visitRefs` lists each id with its kind, where the source can say it without reading
+bodies. Only a policy that excludes kinds uses it: an excluded kind's id is then left out by its
+kind instead of by fetching every body in the window. Its default answers `visitIds` with the
+kind unknown, so an implementation written before it keeps working.
 
 The implementation reads un-lensed and un-gated, via `EngineReads` (§6.1). The same `fetch`
 serves Cypher hydration (§8.3).
@@ -532,13 +549,29 @@ It merge-diffs them:
 - **extra** in Neo4j → `unapply`, first;
 - **missing** in Neo4j → `fetch` (chunks of 500) → `apply` **authoritatively**.
 
-*Built:* an authoritative apply bypasses the fence and displaces a slot's incumbent whatever its
-age, because the source says the event is held now. Without it, a stale version of a slot whose
-winner sat in another window was left out forever. This covers the two residuals no local rule
-can see:
+*Built:* an authoritative apply carries the second the source was read at (just before the
+`fetch`). It bypasses a fence stamped BEFORE that read, because the source said the event was
+held after the removal. A fence stamped at or after the read wins: the feed removed the event
+after the fetch saw it, and applying would resurrect it. The apply still respects NIP-01 in its
+slot. An incumbent that out-ranks it is kept and reported (`ApplyOutcome.outranked`), and the
+reconciler asks the source about it: if the source no longer holds it, it is unapplied as an
+extra and the event applied again. If the source still holds it, the feed superseded the event
+after the fetch, and evicting the newer version would be wrong. Without this, a stale version of
+a slot whose winner sat in another window was left out forever. It covers the two residuals no
+local rule can see:
 - a remove delivered more than a fence window before its own put;
 - with unreported (atomic) supersession, a stale version delivered after its successor was
   itself removed, so the slot looks empty.
+
+*Built:* **re-derivation.** Every `:Stored` node carries `derived`, the stamp of the derivation
+that wrote it (`Derivation.stamp`: the schema major, `Derivation.VERSION` and the policy hash).
+The graph listing returns it, and a held event whose stamp is not the running build's is fetched
+and rewritten in place (`GraphIndex.rederive`: one transaction, old edges unapplied while
+keeping every node the new derivation references, no fence and no slot contest). Re-derived
+events count against the sweep's budget. A leaf may use at least half the budget for them and
+stops on a whole second, so the next tick resumes there. `SchemaInstaller` records the stamp in
+`:Meta` and REFUSES a graph whose `schema_version` has another major: a major renames types,
+which re-deriving cannot migrate, so it is a rebuild.
 
 Windows are sized to about 250k ids. A 500M-id snapshot cannot be materialized; staging measured
 ~5.3 GiB for 43.7M ids.
@@ -561,6 +594,18 @@ Work drained from the dirty tracker is put back if the tick fails before reachin
 that only feeds the graph (vespa-relay's sync) runs `tick(dirtyOnly = true)`, repairing its own
 drops, since its tracker lives in its own memory. The tracker is saved to a file on close and
 loaded on open, so a restart keeps what is owed.
+
+*Built:* nothing a stage could not do is lost, and nothing poison blocks the rest:
+- an event the graph refuses in any stage marks its hour dirty with exponential backoff (5 min,
+  doubling per consecutive failure, at most a day);
+- a dirty hour that throws is put back with the same backoff, and the tick goes on with the
+  other hours and stages. Three in a row mean the graph or the source is down, so the rest go
+  back untouched;
+- removal ids that do not fit the tracker are kept up to its bound. The overflow flag clears once
+  a whole sweep pass that began after the last overflow has wrapped.
+- `GraphProjection.close()` stops the loop `ReconcileLoop.start` launched before saving the
+  tracker (a cancelled tick puts back what it drained). An embedder that drives `tick()` itself
+  stops it first.
 
 Races are benign:
 - a missing event still in the live queue is applied twice, and the second apply is a no-op;

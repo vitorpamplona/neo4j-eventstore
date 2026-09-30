@@ -25,6 +25,7 @@ import com.vitorpamplona.neo4j.eventstore.engine.EdgeRow
 import com.vitorpamplona.neo4j.eventstore.engine.EdgeView
 import com.vitorpamplona.neo4j.eventstore.engine.GraphDump
 import com.vitorpamplona.neo4j.eventstore.engine.GraphIndex
+import com.vitorpamplona.neo4j.eventstore.engine.HeldRef
 import com.vitorpamplona.neo4j.eventstore.engine.NodeView
 import com.vitorpamplona.neo4j.eventstore.engine.derive.AddressKey
 import com.vitorpamplona.neo4j.eventstore.engine.derive.EdgeDeriver
@@ -33,12 +34,13 @@ import com.vitorpamplona.neo4j.eventstore.engine.derive.GraphDoc
 import com.vitorpamplona.neo4j.eventstore.engine.derive.NodeKind
 import com.vitorpamplona.neo4j.eventstore.engine.derive.wins
 import com.vitorpamplona.neo4j.eventstore.engine.memory.InMemoryGraphIndex
+import com.vitorpamplona.neo4j.eventstore.engine.schema.Derivation
 import com.vitorpamplona.neo4j.eventstore.engine.schema.Labels
 import com.vitorpamplona.neo4j.eventstore.engine.schema.RelTypes
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
 import com.vitorpamplona.quartz.nip01Core.core.Event
-import com.vitorpamplona.quartz.nip01Core.store.IdAndTime
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -61,9 +63,10 @@ import org.neo4j.driver.exceptions.TransactionTerminatedException
  *
  * CONCURRENCY. Two processes apply at once, so check-then-write must hold a lock: each apply
  * first WRITES to the nodes its decision depends on — the event node (duplicates, the fence) and
- * the slot's anchor, the author `:User` or the `:Address` (supersession) — which takes their
- * exclusive locks until commit. A competing transaction on the same slot then waits and sees the
- * winner.
+ * the slot's anchor, its own `:Address` (supersession) — which takes their exclusive locks until
+ * commit. A competing transaction on the same slot then waits and sees the winner. Hub locks
+ * (a popular user, tag or address) are taken in key order within each statement, so the two
+ * processes do not deadlock on each other's hubs; the driver retries the rare deadlock left.
  */
 class Neo4jGraphIndex(
     private val driver: Driver,
@@ -76,11 +79,14 @@ class Neo4jGraphIndex(
     // deadlock each other on the same hubs for no gain.
     private val writeLock = Mutex()
 
+    // What this build writes on every held node; see Derivation.
+    private val stamp = Derivation.stamp(deriver.policy)
+
     private fun config() = SessionConfig.forDatabase(database)
 
     override suspend fun apply(
         events: List<Event>,
-        authoritative: Boolean,
+        authoritativeAsOf: Long?,
     ): ApplyOutcome {
         if (events.isEmpty()) return ApplyOutcome()
         val docs =
@@ -98,10 +104,13 @@ class Neo4jGraphIndex(
                     // next event reads. Batching is the bulk importer's job, not the live path's.
                     for (pair in docs) {
                         if (pair == null) continue
+                        // A blocking loop: without this a cancelled caller (a shutdown's bounded
+                        // drain) would wait out every remaining event's retries on a down server.
+                        ensureActive()
                         val (event, doc) = pair
                         outcome +=
                             try {
-                                session.executeWrite { tx -> applyOne(tx, doc, authoritative) }
+                                session.executeWrite { tx -> applyOne(tx, doc, authoritativeAsOf) }
                             } catch (e: ClientException) {
                                 // The graph refuses THIS event (a constraint, a value it cannot
                                 // index): isolate it, or one poison event would fail every batch
@@ -120,7 +129,7 @@ class Neo4jGraphIndex(
     private fun applyOne(
         tx: TransactionContext,
         doc: GraphDoc,
-        authoritative: Boolean,
+        authoritativeAsOf: Long?,
     ): ApplyOutcome {
         // Lock the event node (creating it as a stub if new) and read its state.
         val state =
@@ -136,39 +145,79 @@ class Neo4jGraphIndex(
                     mapOf("id" to doc.id),
                 ).single()
         if (state["stored"].asBoolean()) return ApplyOutcome(duplicate = 1)
-        if (!authoritative && !state["removedAt"].isNull && state["removedAt"].asLong() >= nowSecs() - fenceSeconds) {
+        val removedAt = state["removedAt"]
+        if (!removedAt.isNull && InMemoryGraphIndex.fenceHolds(removedAt.asLong(), authoritativeAsOf, nowSecs(), fenceSeconds)) {
             dropIfOrphan(tx, NodeKind.EVENT, doc.id)
             return ApplyOutcome(fenced = 1)
         }
 
-        val incumbent = lockSlotAndFindIncumbent(tx, doc)
-        if (incumbent != null) {
-            if (!authoritative && wins(incumbent.second, incumbent.first, doc.createdAt, doc.id)) {
-                dropIfOrphan(tx, NodeKind.EVENT, doc.id)
-                cleanupSlotAnchor(tx, doc)
-                return ApplyOutcome(stale = 1)
-            }
-            // Keep what the new version is about to reference (its author, its address, shared
-            // targets): deleting a node and re-MERGEing its key in one transaction is the
-            // read-after-delete pattern apply() avoids.
-            // That includes the incumbent itself when the new version tags it (an `e` to the
-            // previous version): it must stay a stub, not be deleted and re-created.
-            unapplyStored(
-                tx,
-                incumbent.first,
-                keep =
-                    doc.edges.mapTo(HashSet()) { it.target.kind to it.target.key } + (NodeKind.EVENT to doc.id),
-            )
+        // Normally at most one; after a bulk load (a dump spans time) several versions of one
+        // slot can be held until the reconciler removes the losers. They come winner first.
+        val incumbents = lockSlotAndFindIncumbents(tx, doc)
+        val winner = incumbents.firstOrNull()
+        if (winner != null && wins(winner.createdAt, winner.id, doc.createdAt, doc.id)) {
+            // No anchor cleanup: the incumbent's ADDRESS edge keeps the anchor referenced.
+            dropIfOrphan(tx, NodeKind.EVENT, doc.id)
+            // Kept even under authority: the source may hold it too (it superseded this event
+            // after the reconciler read it). The caller checks, and removes it if not.
+            val outranked = if (authoritativeAsOf != null) mapOf(doc.id to winner.id) else emptyMap()
+            return ApplyOutcome(stale = 1, outranked = outranked)
+        }
+        if (incumbents.isNotEmpty()) {
+            val keep = keepFor(doc)
+            for (loser in incumbents) unapplyStored(tx, loser.id, keep)
         }
         write(tx, doc)
         return ApplyOutcome(applied = 1)
     }
 
-    /** Locks the slot's anchor node and returns the incumbent's (id, created_at), if any. */
-    private fun lockSlotAndFindIncumbent(
+    override suspend fun rederive(events: List<Event>): ApplyOutcome {
+        if (events.isEmpty()) return ApplyOutcome()
+        return writeLock.withLock {
+            withContext(Dispatchers.IO) {
+                driver.session(config()).use { session ->
+                    var outcome = ApplyOutcome()
+                    for (event in events) {
+                        ensureActive()
+                        if (!deriver.policy.admits(event.kind)) {
+                            outcome += ApplyOutcome(excluded = 1)
+                            continue
+                        }
+                        val doc = deriver.derive(event)
+                        outcome +=
+                            try {
+                                session.executeWrite { tx ->
+                                    // unapplyStored locks the node first and does nothing when it is
+                                    // not held; keepFor holds the node itself and everything the new
+                                    // derivation references, so nothing is deleted and re-MERGEd.
+                                    if (unapplyStored(tx, doc.id, keepFor(doc))) {
+                                        write(tx, doc)
+                                        ApplyOutcome(applied = 1)
+                                    } else {
+                                        ApplyOutcome(stale = 1)
+                                    }
+                                }
+                            } catch (e: ClientException) {
+                                if (e is SecurityException || e is FatalDiscoveryException || e is TransactionTerminatedException) throw e
+                                ApplyOutcome(failed = listOf(event))
+                            }
+                    }
+                    outcome
+                }
+            }
+        }
+    }
+
+    private class Incumbent(
+        val id: String,
+        val createdAt: Long,
+    )
+
+    /** Locks the slot's anchor node and returns every held version in it, the NIP-01 winner first. */
+    private fun lockSlotAndFindIncumbents(
         tx: TransactionContext,
         doc: GraphDoc,
-    ): Pair<String, Long>? =
+    ): List<Incumbent> =
         doc.slot?.let { slot ->
             val key = AddressKey.parse(slot.address)
             tx
@@ -181,6 +230,7 @@ class Neo4jGraphIndex(
                     OPTIONAL MATCH (a)<-[:$ADDRESS]-(old:${Labels.STORED})
                     WHERE old.${Labels.EVENT_KEY} <> ${'$'}id
                     RETURN old.${Labels.EVENT_KEY} AS id, old.created_at AS createdAt
+                    ORDER BY createdAt DESC, id ASC
                     """.trimIndent(),
                     mapOf(
                         "address" to slot.address,
@@ -190,17 +240,9 @@ class Neo4jGraphIndex(
                         "id" to doc.id,
                     ),
                 ).list()
-                .firstOrNull { !it["id"].isNull }
-                ?.let { it["id"].asString() to it["createdAt"].asLong() }
-        }
-
-    // A skipped apply may have just MERGEd its slot anchor into existence; leave no orphan.
-    private fun cleanupSlotAnchor(
-        tx: TransactionContext,
-        doc: GraphDoc,
-    ) {
-        doc.slot?.let { slot -> dropAddressIfOrphan(tx, slot.address)?.let { dropIfOrphan(tx, NodeKind.USER, it) } }
-    }
+                .filter { !it["id"].isNull }
+                .map { Incumbent(it["id"].asString(), it["createdAt"].asLong()) }
+        } ?: emptyList()
 
     /**
      * Stores [doc] in ONE statement: the node, its fence cleared, every edge group (a unit `CALL`
@@ -214,14 +256,18 @@ class Neo4jGraphIndex(
     ) {
         val params = HashMap<String, Any?>()
         params["id"] = doc.id
-        params["props"] = InMemoryGraphIndex.eventProps(doc)
+        params["props"] = InMemoryGraphIndex.eventProps(doc, stamp)
         val cypher = StringBuilder()
         cypher.append("MATCH (e:${Labels.EVENT} {${Labels.EVENT_KEY}: \$id}) SET e:${Labels.STORED}, e += \$props ")
         cypher.append("WITH e OPTIONAL MATCH (r:${Labels.REMOVED} {id: \$id}) DELETE r WITH e ")
 
-        for ((kind, edges) in doc.edges.groupBy { it.target.kind }) {
+        // Groups in one fixed order and each group's rows by target key: every hub lock this
+        // statement takes (a CREATE locks both endpoints) is taken in the order dropOrphans takes
+        // them, so two writer processes wait on each other instead of deadlocking.
+        val groups = doc.edges.groupBy { it.target.kind }.toSortedMap()
+        for ((kind, edges) in groups) {
             val rows =
-                edges.map { edge ->
+                edges.sortedBy { it.target.key }.map { edge ->
                     require(RelTypes.isSafe(edge.type)) { "unsafe relationship type ${edge.type}" }
                     val row = HashMap<String, Any>()
                     row["key"] = edge.target.key
@@ -279,10 +325,12 @@ class Neo4jGraphIndex(
             cypher.append("} ")
         }
 
-        // After the USER group, which MERGEd the author (every doc has its AUTHOR edge).
-        doc.authorProps?.let { values ->
-            params["pk"] = doc.pubkey
-            params["authorProps"] = values
+        // After the USER group, which MERGEd the author: keyed on the AUTHOR edge's target, never
+        // the raw pubkey (GraphDoc.authorKey), and skipped when there is no such edge.
+        val author = doc.authorKey
+        if (doc.authorProps != null && author != null) {
+            params["pk"] = author
+            params["authorProps"] = doc.authorProps
             cypher.append(
                 "CALL (e) { MATCH (u:${Labels.USER} {${Labels.USER_KEY}: \$pk}) " +
                     Extractors.USER_FIELDS.joinToString(" ") { "SET u.$it = null" } + " SET u += \$authorProps } ",
@@ -299,6 +347,7 @@ class Neo4jGraphIndex(
                     val now = nowSecs()
                     // One transaction per id, for the reason apply() gives.
                     for (id in ids) {
+                        ensureActive()
                         session.executeWrite { tx ->
                             // Lock the event's key FIRST, held or not: apply() takes the same lock
                             // before it reads the fence, so a concurrent apply of an id this
@@ -445,16 +494,11 @@ class Neo4jGraphIndex(
                 mapOf("keys" to addresses.sorted()),
             ).list { it["owner"].asString() }
 
-    private fun dropAddressIfOrphan(
-        tx: TransactionContext,
-        address: String,
-    ): String? = dropAddressOrphans(tx, listOf(address)).firstOrNull()
-
     override suspend fun visitIds(
         since: Long,
         until: Long,
         pageSize: Int,
-        onPage: suspend (List<IdAndTime>) -> Boolean,
+        onPage: suspend (List<HeldRef>) -> Boolean,
     ) {
         // No sentinel cursor: `since - 1` overflows for since = Long.MIN_VALUE (the sweep's head).
         var first = true
@@ -471,7 +515,7 @@ class Neo4jGraphIndex(
                                     MATCH (e:${Labels.STORED})
                                     WHERE e.created_at >= ${'$'}from AND e.created_at <= ${'$'}until
                                       AND (${'$'}first OR e.created_at > ${'$'}ca OR (e.created_at = ${'$'}ca AND e.${Labels.EVENT_KEY} > ${'$'}id))
-                                    RETURN e.created_at AS ca, e.${Labels.EVENT_KEY} AS id
+                                    RETURN e.created_at AS ca, e.${Labels.EVENT_KEY} AS id, coalesce(e.${Derivation.PROPERTY}, 0) AS derived
                                     ORDER BY ca, id LIMIT ${'$'}n
                                     """.trimIndent(),
                                     mapOf(
@@ -484,7 +528,7 @@ class Neo4jGraphIndex(
                                         "id" to lastId,
                                         "n" to pageSize.toLong(),
                                     ),
-                                ).list { IdAndTime(it["ca"].asLong(), it["id"].asString()) }
+                                ).list { HeldRef(it["ca"].asLong(), it["id"].asString(), it["derived"].asLong()) }
                         }
                     }
                 }
@@ -589,6 +633,31 @@ class Neo4jGraphIndex(
     override fun close() = Unit
 
     companion object {
+        /**
+         * What an apply or a re-derive that displaces a held version must NOT delete while it
+         * unapplies it: every node the new derivation references, the new event's own node, and
+         * the owner of every address it references — the address group re-MERGEs that owner, and
+         * an owner the old version's dropped address orphaned would otherwise be deleted and
+         * re-created in one transaction (the read-after-delete pattern apply() avoids). The
+         * incumbent itself is in the set when the new version tags it (an `e` to the previous
+         * version): it must stay a stub.
+         */
+        internal fun keepFor(doc: GraphDoc): Set<Pair<NodeKind, String>> {
+            val keep = HashSet<Pair<NodeKind, String>>()
+            keep += NodeKind.EVENT to doc.id
+            for (edge in doc.edges) {
+                keep += edge.target.kind to edge.target.key
+                if (edge.target.kind == NodeKind.ADDRESS) {
+                    AddressKey
+                        .parse(edge.target.key)
+                        ?.pubkey
+                        ?.takeIf { it.isNotEmpty() }
+                        ?.let { keep += NodeKind.USER to it }
+                }
+            }
+            return keep
+        }
+
         private val AUTHOR = safe(Relation.AUTHOR.name)
         private val ADDRESS = safe(Relation.ADDRESS.name)
 

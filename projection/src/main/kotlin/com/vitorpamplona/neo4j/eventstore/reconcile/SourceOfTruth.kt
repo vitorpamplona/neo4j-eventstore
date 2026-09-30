@@ -37,6 +37,26 @@ interface SourceOfTruth {
         onPage: suspend (List<IdAndTime>) -> Boolean,
     )
 
+    /**
+     * [visitIds] with each event's kind, for a source that can list it without reading bodies.
+     * Only a policy that EXCLUDES kinds needs it: the reconciler leaves an excluded kind's id out
+     * of its diff by its [SourceRef.kind], where it would otherwise have to fetch every body in
+     * the window to learn it. The default answers [visitIds] with the kind unknown (null), so an
+     * implementation that predates this member keeps working, at that cost.
+     */
+    suspend fun visitRefs(
+        since: Long,
+        until: Long,
+        onPage: suspend (List<SourceRef>) -> Boolean,
+    ) = visitIds(since, until) { page -> onPage(page.map { SourceRef(it.createdAt, it.id) }) }
+
     /** The stored events among [ids] (absent ids are simply missing from the answer). */
     suspend fun fetch(ids: List<String>): List<Event>
 }
+
+/** One entry of a [SourceOfTruth.visitRefs] listing; [kind] is null when the source cannot say it cheaply. */
+data class SourceRef(
+    val createdAt: Long,
+    val id: String,
+    val kind: Int? = null,
+)

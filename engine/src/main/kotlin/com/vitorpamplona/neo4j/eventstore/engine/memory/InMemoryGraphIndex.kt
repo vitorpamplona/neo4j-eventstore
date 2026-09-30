@@ -25,6 +25,7 @@ import com.vitorpamplona.neo4j.eventstore.engine.EdgeRow
 import com.vitorpamplona.neo4j.eventstore.engine.EdgeView
 import com.vitorpamplona.neo4j.eventstore.engine.GraphDump
 import com.vitorpamplona.neo4j.eventstore.engine.GraphIndex
+import com.vitorpamplona.neo4j.eventstore.engine.HeldRef
 import com.vitorpamplona.neo4j.eventstore.engine.NodeView
 import com.vitorpamplona.neo4j.eventstore.engine.derive.AddressKey
 import com.vitorpamplona.neo4j.eventstore.engine.derive.EdgeDeriver
@@ -33,10 +34,10 @@ import com.vitorpamplona.neo4j.eventstore.engine.derive.GraphDoc
 import com.vitorpamplona.neo4j.eventstore.engine.derive.NodeKind
 import com.vitorpamplona.neo4j.eventstore.engine.derive.NodeRef
 import com.vitorpamplona.neo4j.eventstore.engine.derive.wins
+import com.vitorpamplona.neo4j.eventstore.engine.schema.Derivation
 import com.vitorpamplona.neo4j.eventstore.engine.schema.Labels
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
 import com.vitorpamplona.quartz.nip01Core.core.Event
-import com.vitorpamplona.quartz.nip01Core.store.IdAndTime
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -65,31 +66,39 @@ class InMemoryGraphIndex(
     private val incoming = HashMap<NodeRef, Int>()
     private val slots = HashMap<String, String>() // slot address -> the held event in it
     private val removedAt = HashMap<String, Long>()
+    private val stamps = HashMap<String, Long>() // held id -> the derivation stamp it was written with
+
+    // What this build writes on every held node (Derivation): a node with any other value was
+    // written by another derivation and is the reconciler's to re-derive.
+    private val stamp = Derivation.stamp(deriver.policy)
 
     override suspend fun apply(
         events: List<Event>,
-        authoritative: Boolean,
+        authoritativeAsOf: Long?,
     ): ApplyOutcome =
         lock.withLock {
             var outcome = ApplyOutcome()
-            for (event in events) outcome += applyOne(event, authoritative)
+            for (event in events) outcome += applyOne(event, authoritativeAsOf)
             outcome
         }
 
     private fun applyOne(
         event: Event,
-        authoritative: Boolean,
+        authoritativeAsOf: Long?,
     ): ApplyOutcome {
         if (!deriver.policy.admits(event.kind)) return ApplyOutcome(excluded = 1)
         if (event.id in held) return ApplyOutcome(duplicate = 1)
-        if (!authoritative) {
-            val at = removedAt[event.id]
-            if (at != null && at >= nowSecs() - fenceSeconds) return ApplyOutcome(fenced = 1)
-        }
+        val at = removedAt[event.id]
+        if (at != null && fenceHolds(at, authoritativeAsOf, nowSecs(), fenceSeconds)) return ApplyOutcome(fenced = 1)
         val doc = deriver.derive(event)
         val incumbent = doc.slot?.let { slots[it.address] }?.let { held[it] }
         if (incumbent != null) {
-            if (!authoritative && wins(incumbent.createdAt, incumbent.id, doc.createdAt, doc.id)) return ApplyOutcome(stale = 1)
+            if (wins(incumbent.createdAt, incumbent.id, doc.createdAt, doc.id)) {
+                // Kept even under authority: the source may hold it too (it superseded this event
+                // after the reconciler read it). The caller checks, and removes it if not.
+                val outranked = if (authoritativeAsOf != null) mapOf(doc.id to incumbent.id) else emptyMap()
+                return ApplyOutcome(stale = 1, outranked = outranked)
+            }
             unapplyHeld(incumbent)
         }
         write(doc)
@@ -97,18 +106,48 @@ class InMemoryGraphIndex(
         return ApplyOutcome(applied = 1)
     }
 
+    override suspend fun rederive(events: List<Event>): ApplyOutcome =
+        lock.withLock {
+            var outcome = ApplyOutcome()
+            for (event in events) {
+                outcome +=
+                    when {
+                        !deriver.policy.admits(event.kind) -> {
+                            ApplyOutcome(excluded = 1)
+                        }
+
+                        else -> {
+                            val old = held[event.id]
+                            if (old == null) {
+                                ApplyOutcome(stale = 1)
+                            } else {
+                                // Unapply-then-write leaves exactly what a fresh apply of the new
+                                // derivation would: shared targets survive through their counts.
+                                unapplyHeld(old)
+                                write(deriver.derive(event))
+                                ApplyOutcome(applied = 1)
+                            }
+                        }
+                    }
+            }
+            outcome
+        }
+
     private fun write(doc: GraphDoc) {
         held[doc.id] = doc
+        stamps[doc.id] = stamp
         stubs.remove(doc.id)
         doc.slot?.let { slots[it.address] = doc.id }
         for (edge in doc.edges) {
             ensureNode(edge.target)
             incoming.merge(edge.target, 1, Int::plus)
         }
-        doc.authorProps?.let { values ->
-            val props = users.getOrPut(doc.pubkey) { HashMap() }
+        val author = doc.authorKey
+        if (doc.authorProps != null && author != null) {
+            // The AUTHOR edge above created the node; never key on the raw pubkey (GraphDoc.authorKey).
+            val props = users.getOrPut(author) { HashMap() }
             Extractors.USER_FIELDS.forEach { props.remove(it) }
-            props.putAll(values)
+            props.putAll(doc.authorProps)
         }
     }
 
@@ -153,8 +192,11 @@ class InMemoryGraphIndex(
 
     private fun unapplyHeld(doc: GraphDoc) {
         held.remove(doc.id)
+        stamps.remove(doc.id)
         doc.slot?.let { slots.remove(it.address, doc.id) }
-        if (doc.authorProps != null) users[doc.pubkey]?.let { props -> Extractors.USER_FIELDS.forEach { props.remove(it) } }
+        if (doc.authorProps != null) {
+            doc.authorKey?.let { users[it] }?.let { props -> Extractors.USER_FIELDS.forEach { props.remove(it) } }
+        }
         // The node survives as a stub while anything still points at it.
         val self = NodeRef(NodeKind.EVENT, doc.id)
         if ((incoming[self] ?: 0) > 0) stubs.add(doc.id)
@@ -200,14 +242,14 @@ class InMemoryGraphIndex(
         since: Long,
         until: Long,
         pageSize: Int,
-        onPage: suspend (List<IdAndTime>) -> Boolean,
+        onPage: suspend (List<HeldRef>) -> Boolean,
     ) {
         val all =
             lock.withLock {
                 held.values
                     .filter { it.createdAt in since..until }
-                    .map { IdAndTime(it.createdAt, it.id) }
-                    .sortedWith(compareBy<IdAndTime> { it.createdAt }.thenBy { it.id })
+                    .map { HeldRef(it.createdAt, it.id, stamps[it.id] ?: 0L) }
+                    .sortedWith(compareBy<HeldRef> { it.createdAt }.thenBy { it.id })
             }
         for (page in all.chunked(pageSize)) if (!onPage(page)) return
     }
@@ -224,7 +266,7 @@ class InMemoryGraphIndex(
     override suspend fun dump(): GraphDump =
         lock.withLock {
             val nodes = HashSet<NodeView>()
-            for (doc in held.values) nodes += NodeView(Labels.EVENT, doc.id, true, eventProps(doc))
+            for (doc in held.values) nodes += NodeView(Labels.EVENT, doc.id, true, eventProps(doc, stamps[doc.id] ?: 0L))
             for (id in stubs) nodes += NodeView(Labels.EVENT, id, false, emptyMap())
             for ((pk, props) in users) nodes += NodeView(Labels.USER, pk, false, HashMap(props))
             for ((id, key) in addresses) nodes += NodeView(Labels.ADDRESS, id, false, addressProps(key))
@@ -240,6 +282,26 @@ class InMemoryGraphIndex(
             GraphDump(nodes, edges)
         }
 
+    /**
+     * This graph as another build opens it: the same nodes and edges, stamps and fence, now
+     * applied through [deriver] — what a deploy does to a Neo4j database. Tests use it to hold a
+     * graph an OLDER derivation wrote, which the reconciler must then re-derive.
+     */
+    suspend fun reopen(deriver: EdgeDeriver = EdgeDeriver()): InMemoryGraphIndex =
+        lock.withLock {
+            InMemoryGraphIndex(deriver, fenceSeconds, nowSecs).also { copy ->
+                copy.held.putAll(held)
+                copy.stubs.addAll(stubs)
+                users.forEach { (k, v) -> copy.users[k] = HashMap(v) }
+                copy.addresses.putAll(addresses)
+                copy.tagNodes.putAll(tagNodes)
+                copy.incoming.putAll(incoming)
+                copy.slots.putAll(slots)
+                copy.removedAt.putAll(removedAt)
+                copy.stamps.putAll(stamps)
+            }
+        }
+
     override fun close() = Unit
 
     companion object {
@@ -249,12 +311,31 @@ class InMemoryGraphIndex(
         // tagged in `p` and linked in the content is two MENTIONs, `via` p and `via` content).
         val EDGE_ORDER = compareBy<EdgeView>({ it.type }, { it.targetLabel }, { it.targetKey }, { it.props.toSortedMap().toString() })
 
-        /** An event node's normalized properties (shared with the Neo4j binding's dump). */
-        fun eventProps(doc: GraphDoc): Map<String, Any> =
+        /** An event node's normalized properties, with the [stamp] it is written with (shared with the Neo4j binding). */
+        fun eventProps(
+            doc: GraphDoc,
+            stamp: Long,
+        ): Map<String, Any> =
             HashMap<String, Any>(doc.nodeProps).apply {
                 put("kind", doc.kind.toLong())
                 put("created_at", doc.createdAt)
+                put(Derivation.PROPERTY, stamp)
             }
+
+        /**
+         * Whether a fence stamped at [removedAt] keeps an apply out. A live apply ([asOf] null)
+         * is fenced within the window: it may be a late put racing its own removal. An
+         * authoritative one only by a removal at or after the source read it was made from
+         * ([asOf]): that removal is newer than the read, and applying would resurrect what the
+         * source has since dropped. Same second counts as after — a resurrection is the worse
+         * error, and a skipped apply is found missing again on the next pass.
+         */
+        fun fenceHolds(
+            removedAt: Long,
+            asOf: Long?,
+            now: Long,
+            fenceSeconds: Long,
+        ): Boolean = if (asOf == null) removedAt >= now - fenceSeconds else removedAt >= asOf
 
         fun addressProps(key: AddressKey): Map<String, Any> = mapOf("kind" to key.kind.toLong(), "pubkey" to key.pubkey, "d" to key.d)
     }

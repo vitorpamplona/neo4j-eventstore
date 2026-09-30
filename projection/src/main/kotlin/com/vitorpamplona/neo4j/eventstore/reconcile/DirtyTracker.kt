@@ -22,6 +22,7 @@ package com.vitorpamplona.neo4j.eventstore.reconcile
 
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * What the live feed could not deliver, for the reconciler to repair first (spec §6.2).
@@ -29,6 +30,10 @@ import java.util.concurrent.ConcurrentHashMap
  * A dropped PUT is remembered by its `created_at` HOUR: the reconciler re-diffs that hour. A
  * dropped REMOVE carries no timestamp, so its ids are kept as-is: the reconciler asks the source
  * whether each is still stored and unapplies the ones that are not.
+ *
+ * An hour whose repair keeps FAILING (an event the graph refuses, a window that throws) is owed
+ * with exponential backoff ([markFailing]): retried, but not every tick, so one poison event
+ * neither spins the reconciler nor starves the hours behind it.
  */
 class DirtyTracker(
     private val maxRemovals: Int = 1_000_000,
@@ -36,15 +41,23 @@ class DirtyTracker(
     private val hours = ConcurrentHashMap.newKeySet<Long>()
     private val removals = ConcurrentHashMap.newKeySet<String>()
 
+    // Failing hours: when each is next due, and how many times in a row it has failed.
+    private val deferred = ConcurrentHashMap<Long, Long>()
+    private val attempts = ConcurrentHashMap<Long, Int>()
+
+    private val overflows = AtomicLong()
+
     /**
      * Set when removal ids had to be dropped for want of room. Those are left to the full sweep
-     * (which finds them as extras); surfaced on the health surface so an operator knows.
+     * (which finds them as extras); surfaced on the health surface so an operator knows, and
+     * cleared by the sweep once a whole pass that started after the last overflow has wrapped
+     * ([overflowEpoch], [clearOverflow]).
      */
     @Volatile var overflowed: Boolean = false
         private set
 
     fun markCreatedAt(createdAt: Long) {
-        hours.add(Math.floorDiv(createdAt, HOUR) * HOUR)
+        hours.add(hourOf(createdAt))
     }
 
     /** Puts back an hour start [drainHours] handed out (a reconcile that failed before reaching it). */
@@ -52,35 +65,85 @@ class DirtyTracker(
         hours.add(hourStart)
     }
 
-    fun markRemovals(ids: Collection<String>) {
-        if (removals.size + ids.size > maxRemovals) {
-            // Too many to remember: the full sweep will find them as "extras" instead.
-            overflowed = true
-            return
-        }
-        removals.addAll(ids)
+    /**
+     * Owes the hour of [createdAt] again, after a backoff that doubles with each consecutive
+     * failure of that hour ([BACKOFF_BASE_SECONDS], up to [BACKOFF_MAX_SECONDS]) until [settle].
+     */
+    fun markFailing(
+        createdAt: Long,
+        nowSecs: Long,
+    ) {
+        val hour = hourOf(createdAt)
+        val n = attempts.merge(hour, 1, Int::plus) ?: 1
+        deferred[hour] = nowSecs + backoffSeconds(n)
     }
 
-    /** Takes (and clears) the dirty hour starts, oldest first. */
-    fun drainHours(): List<Long> = hours.toList().sorted().also { hours.removeAll(it.toSet()) }
+    /** The hour starting at [hourStart] was repaired cleanly: its next failure starts the backoff over. */
+    fun settle(hourStart: Long) {
+        attempts.remove(hourStart)
+    }
+
+    /** Keeps as many of [ids] as there is room for; the rest are left to the full sweep ([overflowed]). */
+    fun markRemovals(ids: Collection<String>) {
+        if (removals.size + ids.size <= maxRemovals) {
+            removals.addAll(ids)
+            return
+        }
+        for (id in ids) {
+            if (id in removals) continue
+            if (removals.size >= maxRemovals) {
+                overflow()
+                return
+            }
+            removals.add(id)
+        }
+    }
+
+    private fun overflow() =
+        synchronized(this) {
+            overflows.incrementAndGet()
+            overflowed = true
+        }
+
+    /** A counter of overflows: the sweep notes it when a pass starts. */
+    fun overflowEpoch(): Long = overflows.get()
+
+    /** Clears [overflowed] if nothing overflowed since [epoch] — a sweep pass that started then has seen every extra. */
+    fun clearOverflow(epoch: Long) =
+        synchronized(this) {
+            if (overflows.get() == epoch) overflowed = false
+        }
+
+    /**
+     * Takes (and clears) the dirty hour starts due by [nowSecs], oldest first: every hour marked
+     * dirty, plus the failing ones whose backoff has passed (all of them by default).
+     */
+    fun drainHours(nowSecs: Long = Long.MAX_VALUE): List<Long> {
+        val due = deferred.entries.filter { it.value <= nowSecs }.map { it.key }
+        due.forEach { deferred.remove(it) }
+        val out = (hours.toList() + due).distinct().sorted()
+        hours.removeAll(out.toSet())
+        return out
+    }
 
     /** Takes (and clears) the dropped-removal ids. */
     fun drainRemovals(): List<String> = removals.toList().also { removals.removeAll(it.toSet()) }
 
-    fun pendingHours() = hours.size
+    fun pendingHours() = (hours + deferred.keys).size
 
     fun pendingRemovals() = removals.size
 
     /**
      * Writes what is pending to [file] (atomically), so a restart keeps it: the tracker is in
-     * memory, and the live feed's drops are otherwise only repaired by the full sweep.
+     * memory, and the live feed's drops are otherwise only repaired by the full sweep. A failing
+     * hour is saved as a plain dirty hour (its backoff starts over).
      */
     fun save(file: File) {
         file.parentFile?.mkdirs()
         val tmp = File(file.path + ".tmp")
         tmp.bufferedWriter().use { w ->
             if (overflowed) w.write("overflowed\n")
-            hours.forEach { w.write("h $it\n") }
+            (hours + deferred.keys).forEach { w.write("h $it\n") }
             removals.forEach { w.write("r $it\n") }
         }
         tmp.renameTo(file)
@@ -91,14 +154,25 @@ class DirtyTracker(
         if (!file.exists()) return
         file.forEachLine { line ->
             when {
-                line == "overflowed" -> overflowed = true
+                line == "overflowed" -> overflow()
                 line.startsWith("h ") -> line.substring(2).toLongOrNull()?.let { hours.add(it) }
-                line.startsWith("r ") -> if (removals.size < maxRemovals) removals.add(line.substring(2)) else overflowed = true
+                line.startsWith("r ") -> if (removals.size < maxRemovals) removals.add(line.substring(2)) else overflow()
             }
         }
     }
 
     companion object {
         const val HOUR = 3_600L
+
+        /** A failing hour's first retry: about one reconcile tick. */
+        const val BACKOFF_BASE_SECONDS = 300L
+
+        /** A failing hour is still retried at least daily. */
+        const val BACKOFF_MAX_SECONDS = 86_400L
+
+        fun hourOf(createdAt: Long) = Math.floorDiv(createdAt, HOUR) * HOUR
+
+        fun backoffSeconds(consecutiveFailures: Int): Long =
+            minOf(BACKOFF_MAX_SECONDS, BACKOFF_BASE_SECONDS shl minOf(consecutiveFailures - 1, 20).coerceAtLeast(0))
     }
 }
