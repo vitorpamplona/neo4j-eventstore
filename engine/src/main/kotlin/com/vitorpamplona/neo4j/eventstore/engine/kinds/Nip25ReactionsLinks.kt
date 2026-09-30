@@ -38,18 +38,25 @@ internal fun KindMappers.Builder.nip25Reactions() {
     // should be last of the `p` tags", so the LAST `e`/`a` is what was `REACTED` to and the last
     // `p` its `REACTED_AUTHOR` (not `originalPost`/`originalAuthor`, which return all of them).
     // Earlier ones are copies of the target's thread tags: `MENTION`s. `k` is the target's kind.
+    // NIP-25 also lets the `e` carry the target's pubkey (`["e", <id>, <relay>, <pubkey>]`): with
+    // no `p` at all, that pubkey is the `REACTED_AUTHOR` (`via` the `e` it was read from). Tags are
+    // read without their relay hints, which no link uses.
     on<ReactionEvent> { e ->
-        val reacted = e.tags.lastNotNullOfOrNull(ETag::parse)
-        val reactedAddress = e.tags.lastNotNullOfOrNull(ATag::parse)
-        val author = e.tags.lastNotNullOfOrNull(PTag::parse)
+        val reacted = e.tags.lastNotNullOfOrNull(Nip25ReactedETag::parse)
+        val reactedAddress = e.tags.lastNotNullOfOrNull(ATag::parseAddress)
+        val author = e.tags.lastNotNullOfOrNull(PTag::parseKey)
 
-        event(Relation.REACTED, reacted, ETag.TAG_NAME)
+        event(Relation.REACTED, reacted?.eventId, Nip25ReactedETag.TAG_NAME)
         address(Relation.REACTED, reactedAddress, ATag.TAG_NAME)
-        user(Relation.REACTED_AUTHOR, author, PTag.TAG_NAME)
+        if (author != null) {
+            user(Relation.REACTED_AUTHOR, author, PTag.TAG_NAME)
+        } else {
+            user(Relation.REACTED_AUTHOR, reacted?.author, Nip25ReactedETag.TAG_NAME)
+        }
 
-        each(e.tags, ETag::parse) { if (it.eventId != reacted?.eventId) event(Relation.MENTION, it, ETag.TAG_NAME) }
-        each(e.tags, ATag::parse) { if (it.toTag() != reactedAddress?.toTag()) address(Relation.MENTION, it, ATag.TAG_NAME) }
-        each(e.tags, PTag::parse) { if (it.pubKey != author?.pubKey) user(Relation.MENTION, it, PTag.TAG_NAME) }
+        each(e.tags, ETag::parseId) { if (it != reacted?.eventId) event(Relation.MENTION, it, ETag.TAG_NAME) }
+        each(e.tags, ATag::parseAddress) { if (it != reactedAddress) address(Relation.MENTION, it, ATag.TAG_NAME) }
+        each(e.tags, PTag::parseKey) { if (it != author) user(Relation.MENTION, it, PTag.TAG_NAME) }
         each(e.tags, KindTag::parse) { tag(Relation.TAG, KindTag.TAG_NAME, it.toString()) }
     }
 

@@ -125,4 +125,32 @@ class Nip25ReactionsLinksTest {
             event.links(),
         )
     }
+
+    @Test
+    fun withoutAPTheReactedETagsPubkeyIsTheAuthor() {
+        // NIP-25 lets the e carry the target's pubkey; with no p, that is the only author stated
+        val event =
+            ReactionEvent(
+                id,
+                me,
+                1L,
+                arrayOf(
+                    arrayOf("e", threadRoot, "", rootAuthor),
+                    arrayOf("e", target, "wss://relay.example/", targetAuthor),
+                    arrayOf("k", "1"),
+                ),
+                "+",
+                sig,
+            )
+
+        assertEquals(
+            listOf(
+                Link(Relation.REACTED, LinkTarget.Event(target), "e"),
+                Link(Relation.REACTED_AUTHOR, LinkTarget.User(targetAuthor), "e"),
+                Link(Relation.MENTION, LinkTarget.Event(threadRoot), "e"),
+                Link(Relation.TAG, LinkTarget.Tag("k", "1"), "k"),
+            ),
+            event.links(),
+        )
+    }
 }
