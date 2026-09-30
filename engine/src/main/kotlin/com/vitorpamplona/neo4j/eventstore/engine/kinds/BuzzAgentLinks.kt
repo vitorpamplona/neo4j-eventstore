@@ -21,6 +21,7 @@
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.AuditProps
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.FrameProps
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.StatusProps
@@ -96,7 +97,7 @@ internal fun KindMappers.Builder.buzzAgents() {
         val props = action?.code?.let { AuditProps(it) }
         when (action) {
             AuditAction.EVENT_CREATED, AuditAction.EVENT_DELETED -> event(Relation.AUDITED, e.objectId(), ObjectTag.TAG_NAME, props)
-            else -> tag(Relation.AUDITED, ObjectTag.TAG_NAME, e.objectId(), props = props)
+            else -> value(Relation.AUDITED, ValueType.OBJECT, e.objectId(), ObjectTag.TAG_NAME, props)
         }
     }
 

@@ -22,6 +22,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkBuilder
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.quartz.nip01Core.core.TagArray
 import com.vitorpamplona.quartz.nip01Core.tags.aTag.ATag
@@ -67,7 +68,7 @@ internal fun KindMappers.Builder.nip53LiveActivities() {
     on<LiveActivitiesClipEvent> { e ->
         address(Relation.CLIPPED, e.activity(), ATag.TAG_NAME)
         each(e.tags, PTag::parse) { user(Relation.CLIPPED_AUTHOR, it, PTag.TAG_NAME) }
-        each(e.tags, ReferenceTag::parse) { tag(Relation.TAG, ReferenceTag.TAG_NAME, it) }
+        each(e.tags, ReferenceTag::parse) { value(Relation.REFERENCE, ValueType.URL, it, ReferenceTag.TAG_NAME) }
     }
 
     // NIP-53: a meeting's `a` is the space (30312) it takes place in.

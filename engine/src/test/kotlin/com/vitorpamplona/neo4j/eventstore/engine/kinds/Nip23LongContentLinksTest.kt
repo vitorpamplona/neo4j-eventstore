@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.quartz.nip19Bech32.entities.NAddress
 import com.vitorpamplona.quartz.nip23LongContent.LongFormContentEvent
 import kotlin.test.Test
@@ -61,7 +62,7 @@ class Nip23LongContentLinksTest {
                 Link(Relation.MENTION, LinkTarget.Address(other), "a"),
                 Link(Relation.MENTION, LinkTarget.User(person), "p"),
                 Link(Relation.QUOTE, LinkTarget.Event(quoted), "q"),
-                Link(Relation.HASHTAG, LinkTarget.Tag("t", "nostr"), "t"),
+                Link(Relation.HASHTAG, LinkTarget.Tag(ValueType.HASHTAG, "nostr"), "t"),
                 Link(Relation.MENTION, LinkTarget.Address("30023:$person:cited"), Link.VIA_CONTENT),
             ),
             event.links(),

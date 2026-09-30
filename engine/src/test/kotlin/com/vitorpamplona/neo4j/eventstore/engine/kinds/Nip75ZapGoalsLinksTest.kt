@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.quartz.nip75ZapGoals.ZapGoalEvent
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -60,8 +61,8 @@ class Nip75ZapGoalsLinksTest {
                 Link(Relation.FUNDED, LinkTarget.Event(target), "e"),
                 Link(Relation.FUNDED, LinkTarget.Address(article), "a"),
                 Link(Relation.MENTION, LinkTarget.User(mentioned), "p"),
-                Link(Relation.TAG, LinkTarget.Tag("r", "https://example.com"), "r"),
-                Link(Relation.HASHTAG, LinkTarget.Tag("t", "fund"), "t"),
+                Link(Relation.REFERENCE, LinkTarget.Tag(ValueType.URL, "https://example.com"), "r"),
+                Link(Relation.HASHTAG, LinkTarget.Tag(ValueType.HASHTAG, "fund"), "t"),
             ),
             event.links(),
         )

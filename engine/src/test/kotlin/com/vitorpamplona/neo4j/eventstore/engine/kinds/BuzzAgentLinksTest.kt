@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.AuditProps
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.FrameProps
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.StatusProps
@@ -70,7 +71,7 @@ class BuzzAgentLinksTest {
     private val channel = "7c1f0e2a-3b4d-4e5f-8a9b-0c1d2e3f4a5b"
 
     private val h = arrayOf("h", channel)
-    private val group = Link(Relation.GROUP, LinkTarget.Tag("h", channel), "h")
+    private val group = Link(Relation.GROUP, LinkTarget.Tag(ValueType.GROUP, channel), "h")
 
     @Test
     fun jobLifecycle() {
@@ -243,7 +244,7 @@ class BuzzAgentLinksTest {
         // A media sha256 is 64-hex too: it must stay a plain value.
         val sha256 = "5".repeat(64)
         assertEquals(
-            listOf(Link(Relation.AUDITED, LinkTarget.Tag("object", sha256), "object", AuditProps(action = "media_uploaded"))),
+            listOf(Link(Relation.AUDITED, LinkTarget.Tag(ValueType.OBJECT, sha256), "object", AuditProps(action = "media_uploaded"))),
             AuditEntryEvent(id, author, 0, arrayOf(arrayOf("action", "media_uploaded"), arrayOf("object", sha256)), "{}", sig).links(),
         )
     }

@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.quartz.nipC0CodeSnippets.CodeSnippetEvent
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -47,7 +48,7 @@ class NipC0CodeSnippetsLinksTest {
         assertEquals(
             listOf(
                 Link(Relation.REPOSITORY, LinkTarget.Address(repo), "repo"),
-                Link(Relation.TAG, LinkTarget.Tag("l", "kotlin"), "l"),
+                Link(Relation.LANGUAGE, LinkTarget.Tag(ValueType.LANGUAGE, "kotlin"), "l"),
             ),
             event.links(),
         )

@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.ParticipantProps
 import com.vitorpamplona.quartz.nip19Bech32.toNpub
 import com.vitorpamplona.quartz.nip53LiveActivities.chat.LiveActivitiesChatMessageEvent
@@ -72,7 +73,7 @@ class Nip53LiveActivitiesLinksTest {
                 Link(Relation.PARENT, LinkTarget.Event(message), "e"),
                 Link(Relation.MENTION, LinkTarget.User(host), "p"),
                 Link(Relation.QUOTE, LinkTarget.Event(quoted), "q"),
-                Link(Relation.HASHTAG, LinkTarget.Tag("t", "nostr"), "t"),
+                Link(Relation.HASHTAG, LinkTarget.Tag(ValueType.HASHTAG, "nostr"), "t"),
                 Link(Relation.MENTION, LinkTarget.User(cited), Link.VIA_CONTENT),
             ),
             event.links(),
@@ -153,7 +154,7 @@ class Nip53LiveActivitiesLinksTest {
             listOf(
                 Link(Relation.CLIPPED, LinkTarget.Address(stream), "a"),
                 Link(Relation.CLIPPED_AUTHOR, LinkTarget.User(host), "p"),
-                Link(Relation.TAG, LinkTarget.Tag("r", "https://video.example/clip.mp4"), "r"),
+                Link(Relation.REFERENCE, LinkTarget.Tag(ValueType.URL, "https://video.example/clip.mp4"), "r"),
             ),
             event.links(),
         )
@@ -221,7 +222,7 @@ class Nip53LiveActivitiesLinksTest {
                 Link(Relation.PARTICIPANT, LinkTarget.User(host), "p", ParticipantProps(listOf("Host"))),
                 Link(Relation.PIN, LinkTarget.Event(message), "pinned"),
                 Link(Relation.GOAL, LinkTarget.Event(goal), "goal"),
-                Link(Relation.HASHTAG, LinkTarget.Tag("t", "music"), "t"),
+                Link(Relation.HASHTAG, LinkTarget.Tag(ValueType.HASHTAG, "music"), "t"),
             ),
             stream.links(),
         )

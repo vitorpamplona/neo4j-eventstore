@@ -21,6 +21,7 @@
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.PlatformProps
 import com.vitorpamplona.quartz.nip01Core.tags.aTag.ATag
@@ -37,7 +38,7 @@ internal fun KindMappers.Builder.nip89AppHandlers() {
      * plain `a` does not. The `client` tag is linked for every kind by [KindLinks.of].
      */
     on<AppDefinitionEvent> { e ->
-        each(e.tags, KindTag::parse) { tag(Relation.TAG, KindTag.TAG_NAME, it.toString()) }
+        each(e.tags, KindTag::parse) { value(Relation.SUPPORTED_KIND, ValueType.KIND, it.toString(), KindTag.TAG_NAME) }
         each(e.tags, Nip89ManifestReleaseTag::parse) { address(Relation.SITE_MANIFEST, it.address, it.release, it.linkProps()) }
         each(e.tags, ATag::parse) { address(Relation.SITE_MANIFEST, it, ATag.TAG_NAME) }
         hashtags(e.tags)

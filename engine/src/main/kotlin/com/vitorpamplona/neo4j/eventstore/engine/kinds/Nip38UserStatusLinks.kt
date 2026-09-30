@@ -21,6 +21,7 @@
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.quartz.nip01Core.tags.aTag.ATag
 import com.vitorpamplona.quartz.nip01Core.tags.events.ETag
@@ -33,7 +34,7 @@ internal fun KindMappers.Builder.nip38UserStatus() {
     // NIP-38: a status may link to a profile, a note or an addressable event (`p`/`e`/`a`), each
     // `LINKED`, and to a URL (`r`). The `d` is the status type, not a reference.
     on<UserStatusEvent> { e ->
-        each(e.tags, ReferenceTag::parse) { tag(Relation.TAG, ReferenceTag.TAG_NAME, it) }
+        each(e.tags, ReferenceTag::parse) { value(Relation.REFERENCE, ValueType.URL, it, ReferenceTag.TAG_NAME) }
         each(e.tags, PTag::parse) { user(Relation.LINKED, it, PTag.TAG_NAME) }
         each(e.tags, ETag::parse) { event(Relation.LINKED, it, ETag.TAG_NAME) }
         each(e.tags, ATag::parse) { address(Relation.LINKED, it, ATag.TAG_NAME) }

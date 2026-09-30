@@ -21,6 +21,7 @@
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.quartz.nip56Reports.ReportEvent
 import com.vitorpamplona.quartz.nip56Reports.tags.HashSha256Tag
 import com.vitorpamplona.quartz.nip56Reports.tags.ReportedAddressTag
@@ -47,7 +48,7 @@ internal fun KindMappers.Builder.nip56Reports() {
         report.events.forEach { event(Relation.REPORTED, it.value, ReportedEventTag.TAG_NAME, it.props) }
         report.authors.forEach { user(personRelation, it.value, ReportedAuthorTag.TAG_NAME, it.props) }
         report.addresses.forEach { address(Relation.REPORTED, it.value, ReportedAddressTag.TAG_NAME, it.props) }
-        report.hashes.forEach { tag(Relation.REPORTED, HashSha256Tag.TAG_NAME, it.value, props = it.props) }
+        report.hashes.forEach { value(Relation.REPORTED, ValueType.SHA256, it.value, HashSha256Tag.TAG_NAME, it.props) }
 
         nip32LabelTags(e.tags)
     }

@@ -22,6 +22,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkBuilder
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.NoProps
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.VoteProps
@@ -81,7 +82,7 @@ internal fun KindMappers.Builder.buzz() {
 internal fun LinkBuilder.buzzChannels(
     tags: TagArray,
     relation: Relation<NoProps> = Relation.GROUP,
-) = each(tags, GroupIdTag::parse) { tag(relation, GroupIdTag.TAG_NAME, it) }
+) = each(tags, GroupIdTag::parse) { value(relation, ValueType.GROUP, it, GroupIdTag.TAG_NAME) }
 
 /**
  * ROOT and PARENT from Buzz's thread e-tags (`buzzThread`). A direct reply carries only a
@@ -132,7 +133,7 @@ private fun KindMappers.Builder.buzzMessaging() {
     // Buzz reuses `l` for the diff's programming language (not a NIP-32 label).
     on<StreamMessageDiffEvent> { e ->
         buzzChannels(e.tags)
-        each(e.tags, LanguageTag::parse) { tag(Relation.TAG, LanguageTag.TAG_NAME, it) }
+        each(e.tags, LanguageTag::parse) { value(Relation.LANGUAGE, ValueType.LANGUAGE, it, LanguageTag.TAG_NAME) }
     }
     on<CanvasEvent> { e ->
         buzzChannels(e.tags)
@@ -177,7 +178,7 @@ private fun KindMappers.Builder.buzzMessaging() {
     // The DM id rides in `d` on a regular kind, so it is a reference, not this event's address:
     // it is linked as the `h` group every other DM event scopes itself with.
     on<DmCreatedEvent> { e ->
-        tag(Relation.GROUP, GroupIdTag.TAG_NAME, e.dmId(), via = DTag.TAG_NAME)
+        value(Relation.GROUP, ValueType.GROUP, e.dmId(), DTag.TAG_NAME)
         each(e.tags, PTag::parse) { user(Relation.PARTICIPANT, it, PTag.TAG_NAME) }
     }
     on<DmAddMemberEvent> { e ->

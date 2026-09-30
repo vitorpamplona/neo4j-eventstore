@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.quartz.nip19Bech32.toNpub
 import com.vitorpamplona.quartz.nip34Git.issue.GitIssueEvent
 import com.vitorpamplona.quartz.nip34Git.patch.GitPatchEvent
@@ -80,8 +81,8 @@ class Nip34GitLinksTest {
                 Link(Relation.PARENT, LinkTarget.Event(previous), "e"),
                 Link(Relation.ROOT, LinkTarget.Event(target), "e"),
                 // `root` and `root-revision` are NIP-34's series markers, not topics.
-                Link(Relation.HASHTAG, LinkTarget.Tag("t", "bugfix"), "t"),
-                Link(Relation.TAG, LinkTarget.Tag("r", "euc-commit"), "r"),
+                Link(Relation.HASHTAG, LinkTarget.Tag(ValueType.HASHTAG, "bugfix"), "t"),
+                Link(Relation.REPOSITORY, LinkTarget.Tag(ValueType.GIT_COMMIT, "euc-commit"), "r"),
             ),
             event.links(),
         )
@@ -110,8 +111,8 @@ class Nip34GitLinksTest {
                 Link(Relation.REPOSITORY, LinkTarget.Address(repo), "a"),
                 Link(Relation.REPOSITORY_OWNER, LinkTarget.User(owner), "p"),
                 Link(Relation.REVISED, LinkTarget.Event(target), "e"),
-                Link(Relation.HASHTAG, LinkTarget.Tag("t", "bug"), "t"),
-                Link(Relation.TAG, LinkTarget.Tag("r", "euc-commit"), "r"),
+                Link(Relation.HASHTAG, LinkTarget.Tag(ValueType.HASHTAG, "bug"), "t"),
+                Link(Relation.REPOSITORY, LinkTarget.Tag(ValueType.GIT_COMMIT, "euc-commit"), "r"),
             ),
             event.links(),
         )
@@ -142,7 +143,7 @@ class Nip34GitLinksTest {
                 Link(Relation.REPOSITORY, LinkTarget.Address(repo), "a"),
                 Link(Relation.REPOSITORY_OWNER, LinkTarget.User(owner), "p"),
                 Link(Relation.MENTION, LinkTarget.User(other), "p"),
-                Link(Relation.TAG, LinkTarget.Tag("r", "euc-commit"), "r"),
+                Link(Relation.REPOSITORY, LinkTarget.Tag(ValueType.GIT_COMMIT, "euc-commit"), "r"),
             ),
             event.links(),
         )
@@ -165,7 +166,7 @@ class Nip34GitLinksTest {
                 Link(Relation.REPOSITORY, LinkTarget.Address(repo), "a"),
                 Link(Relation.REPOSITORY_OWNER, LinkTarget.User(owner), "p"),
                 Link(Relation.QUOTE, LinkTarget.Event(quoted), "q"),
-                Link(Relation.HASHTAG, LinkTarget.Tag("t", "bug"), "t"),
+                Link(Relation.HASHTAG, LinkTarget.Tag(ValueType.HASHTAG, "bug"), "t"),
                 Link(Relation.MENTION, LinkTarget.User(other), Link.VIA_CONTENT),
             ),
             event.links(),
@@ -210,8 +211,8 @@ class Nip34GitLinksTest {
         assertEquals(
             listOf(
                 Link(Relation.MAINTAINER, LinkTarget.User(other), "maintainers"),
-                Link(Relation.HASHTAG, LinkTarget.Tag("t", "personal-fork"), "t"),
-                Link(Relation.TAG, LinkTarget.Tag("r", "euc-commit"), "r"),
+                Link(Relation.HASHTAG, LinkTarget.Tag(ValueType.HASHTAG, "personal-fork"), "t"),
+                Link(Relation.REPOSITORY, LinkTarget.Tag(ValueType.GIT_COMMIT, "euc-commit"), "r"),
                 Link(Relation.FORK, LinkTarget.Address(upstream), "u"),
             ),
             event.links(),
@@ -247,7 +248,7 @@ class Nip34GitLinksTest {
                 Link(Relation.ROOT_AUTHOR, LinkTarget.User(rootAuthor), "p"),
                 Link(Relation.PARENT_AUTHOR, LinkTarget.User(revisionAuthor), "p"),
                 Link(Relation.MENTION, LinkTarget.User(other), "p"),
-                Link(Relation.TAG, LinkTarget.Tag("r", "euc-commit"), "r"),
+                Link(Relation.REPOSITORY, LinkTarget.Tag(ValueType.GIT_COMMIT, "euc-commit"), "r"),
             ),
             event.links(),
         )

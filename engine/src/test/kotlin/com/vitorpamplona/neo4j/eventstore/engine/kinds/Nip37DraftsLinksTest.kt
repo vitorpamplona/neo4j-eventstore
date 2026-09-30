@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.quartz.nip37Drafts.DraftWrapEvent
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -55,7 +56,7 @@ class Nip37DraftsLinksTest {
             )
         assertEquals(
             listOf(
-                Link(Relation.TAG, LinkTarget.Tag("k", "42"), "k"),
+                Link(Relation.DRAFT_KIND, LinkTarget.Tag(ValueType.KIND, "42"), "k"),
                 Link(Relation.ROOT, LinkTarget.Event(channel), "e"),
                 Link(Relation.PARENT, LinkTarget.Event(parent), "e"),
             ),
@@ -77,7 +78,7 @@ class Nip37DraftsLinksTest {
             )
         assertEquals(
             listOf(
-                Link(Relation.TAG, LinkTarget.Tag("k", "1311"), "k"),
+                Link(Relation.DRAFT_KIND, LinkTarget.Tag(ValueType.KIND, "1311"), "k"),
                 Link(Relation.ROOT, LinkTarget.Address(activity), "a"),
             ),
             event.links(),

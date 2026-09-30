@@ -21,6 +21,7 @@
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.quartz.nip22Comments.CommentEvent
 import com.vitorpamplona.quartz.nip22Comments.tags.ReplyAddressTag
@@ -55,8 +56,8 @@ internal fun KindMappers.Builder.nip22Comments() {
             address(Relation.ROOT, it, RootAddressTag.TAG_NAME)
             if (it.kind == CommunityDefinitionEvent.KIND) address(Relation.COMMUNITY, it, RootAddressTag.TAG_NAME)
         }
-        each(e.tags, RootIdentifierTag.Companion::parse) { tag(Relation.ROOT, ReplyIdentifierTag.TAG_NAME, it, RootIdentifierTag.TAG_NAME) }
-        each(e.tags, RootKindTag::parse) { tag(Relation.TAG, ReplyKindTag.TAG_NAME, it, RootKindTag.TAG_NAME) }
+        each(e.tags, RootIdentifierTag.Companion::parse) { external(Relation.ROOT, it, RootIdentifierTag.TAG_NAME) }
+        each(e.tags, RootKindTag::parse) { value(Relation.ROOT_KIND, ValueType.KIND, it, RootKindTag.TAG_NAME) }
         each(e.tags, RootAuthorTag::parseKey) { user(Relation.ROOT_AUTHOR, it, RootAuthorTag.TAG_NAME) }
 
         // The authors the parent tags name, gathered as the parents are linked.
@@ -69,8 +70,8 @@ internal fun KindMappers.Builder.nip22Comments() {
             address(Relation.PARENT, it, ReplyAddressTag.TAG_NAME)
             parentAuthors.add(it.pubKeyHex)
         }
-        each(e.tags, ReplyIdentifierTag::parse) { tag(Relation.PARENT, ReplyIdentifierTag.TAG_NAME, it) }
-        each(e.tags, ReplyKindTag::parse) { tag(Relation.TAG, ReplyKindTag.TAG_NAME, it) }
+        each(e.tags, ReplyIdentifierTag::parse) { external(Relation.PARENT, it, ReplyIdentifierTag.TAG_NAME) }
+        each(e.tags, ReplyKindTag::parse) { value(Relation.PARENT_KIND, ValueType.KIND, it, ReplyKindTag.TAG_NAME) }
 
         each(e.tags, ReplyAuthorTag::parseKey) {
             user(if (it in parentAuthors) Relation.PARENT_AUTHOR else Relation.MENTION, it, ReplyAuthorTag.TAG_NAME)

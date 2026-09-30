@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.ItemProps
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.MemberProps
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.OrderProps
@@ -74,12 +75,12 @@ class ExperimentalListsLinksTest {
             listOf(
                 Link(Relation.PARENT_LIST, LinkTarget.Event(note1), "z"),
                 Link(Relation.PARENT_LIST, LinkTarget.Address(header), "z"),
-                Link(Relation.PARENT_LIST, LinkTarget.Tag("z", "dog"), "z"),
+                Link(Relation.PARENT_LIST, LinkTarget.Tag(ValueType.LIST, "dog"), "z"),
                 Link(Relation.ITEM, LinkTarget.User(bob), "p"),
                 Link(Relation.ITEM, LinkTarget.Event(note2), "e"),
                 Link(Relation.ITEM, LinkTarget.Address(article), "a"),
                 // a list value, case preserved: not a hashtag
-                Link(Relation.ITEM, LinkTarget.Tag("t", "Switzerland"), "t"),
+                Link(Relation.ITEM, LinkTarget.Tag(ValueType.HASHTAG, "Switzerland"), "t"),
             ),
             ListItemEvent(me, me, 0, tags, "", me).links(),
         )
@@ -204,7 +205,7 @@ class ExperimentalListsLinksTest {
             ).links(),
         )
         assertEquals(
-            listOf(Link(Relation.MEMBER, LinkTarget.Tag("i", "isbn:9780765382030"), "i", MemberProps(score = 5))),
+            listOf(Link(Relation.MEMBER, LinkTarget.Tag(ValueType.EXTERNAL, "isbn:9780765382030"), "i", MemberProps(score = 5))),
             ExternalIdTrustedListEvent(me, me, 0, tags(arrayOf("d", "l"), arrayOf("i", "isbn:9780765382030", "", "5")), "", me).links(),
         )
     }
@@ -212,7 +213,7 @@ class ExperimentalListsLinksTest {
     @Test
     fun libraryKinds() {
         assertEquals(
-            listOf(Link(Relation.TAG, LinkTarget.Tag("r", "https://cdn.example/file.mkv"), "r")),
+            listOf(Link(Relation.REFERENCE, LinkTarget.Tag(ValueType.URL, "https://cdn.example/file.mkv"), "r")),
             BlossomPieceIndexEvent(
                 me,
                 me,
@@ -237,7 +238,7 @@ class ExperimentalListsLinksTest {
             ).links(),
         )
         assertEquals(
-            listOf(Link(Relation.HASHTAG, LinkTarget.Tag("t", "math"), "t")),
+            listOf(Link(Relation.HASHTAG, LinkTarget.Tag(ValueType.HASHTAG, "math"), "t")),
             LearningResourceEvent(me, me, 0, tags(arrayOf("d", "r"), arrayOf("t", "Math")), "", me).links(),
         )
     }
@@ -258,12 +259,12 @@ class ExperimentalListsLinksTest {
             listOf(
                 Link(Relation.CURATED, LinkTarget.Address(track1), "a", OrderProps(order = 0)),
                 Link(Relation.CURATED, LinkTarget.Address(track2), "a", OrderProps(order = 1)),
-                Link(Relation.HASHTAG, LinkTarget.Tag("t", "playlist"), "t"),
+                Link(Relation.HASHTAG, LinkTarget.Tag(ValueType.HASHTAG, "playlist"), "t"),
             ),
             MusicPlaylistEvent(me, me, 0, tags, "", me).links(),
         )
         assertEquals(
-            listOf(Link(Relation.HASHTAG, LinkTarget.Tag("t", "music"), "t")),
+            listOf(Link(Relation.HASHTAG, LinkTarget.Tag(ValueType.HASHTAG, "music"), "t")),
             MusicTrackEvent(me, me, 0, tags(arrayOf("d", "one"), arrayOf("t", "music"), arrayOf("artist", "Someone")), "", me).links(),
         )
     }
@@ -288,7 +289,7 @@ class ExperimentalListsLinksTest {
                 Link(Relation.MEMBER, LinkTarget.Address(chapter), "a", MemberProps(order = 0, level = 1, title = "Chapter 1")),
                 Link(Relation.MEMBER, LinkTarget.Event(note1), "e", MemberProps(order = 1, level = 2)),
                 Link(Relation.MENTION, LinkTarget.User(bob), "p"),
-                Link(Relation.HASHTAG, LinkTarget.Tag("t", "fables"), "t"),
+                Link(Relation.HASHTAG, LinkTarget.Tag(ValueType.HASHTAG, "fables"), "t"),
                 Link(Relation.SOURCE, LinkTarget.Address(original), "A"),
                 Link(Relation.SOURCE, LinkTarget.Event(note2), "E"),
             ),
@@ -310,7 +311,7 @@ class ExperimentalListsLinksTest {
                 Link(Relation.PUBLICATION, LinkTarget.Address("30040:$me:book"), "c"),
                 Link(Relation.WIKILINK, LinkTarget.Event(note1), "wikilink"),
                 Link(Relation.WIKILINK_AUTHOR, LinkTarget.User(bob), "wikilink"),
-                Link(Relation.WIKILINK, LinkTarget.Tag("wikilink", "fox"), "wikilink"),
+                Link(Relation.WIKILINK, LinkTarget.Tag(ValueType.WIKI, "fox"), "wikilink"),
             ),
             PublicationContentEvent(me, me, 0, tags, "The [[fox]] and [[the Farmer]]", me).links(),
         )

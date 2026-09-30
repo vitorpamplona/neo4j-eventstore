@@ -274,7 +274,8 @@ class Neo4jGraphIndex(
                     row["props"] = edge.props
                     when (kind) {
                         NodeKind.TAG -> {
-                            row["name"] = edge.target.key.substringBefore(':')
+                            // `type` is the relationship's: the value's type rides as `valueType`.
+                            row["valueType"] = edge.target.key.substringBefore(':')
                             row["value"] = edge.target.key.substringAfter(':')
                         }
 
@@ -305,7 +306,7 @@ class Neo4jGraphIndex(
 
                     NodeKind.TAG -> {
                         "MERGE (t:${Labels.TAG} {${Labels.TAG_KEY}: row.key}) " +
-                            "ON CREATE SET t.name = row.name, t.value = row.value"
+                            "ON CREATE SET t.type = row.valueType, t.value = row.value"
                     }
 
                     NodeKind.ADDRESS -> {

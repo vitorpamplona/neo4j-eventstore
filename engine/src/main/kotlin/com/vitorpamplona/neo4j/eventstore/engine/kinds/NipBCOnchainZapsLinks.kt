@@ -21,6 +21,7 @@
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.ZapProps
 import com.vitorpamplona.quartz.nip01Core.tags.aTag.ATag
@@ -38,7 +39,7 @@ internal fun KindMappers.Builder.nipBCOnchainZaps() {
         each(e.tags, PTag::parse) { user(Relation.ZAP_RECIPIENT, it, PTag.TAG_NAME, props) }
         each(e.tags, ETag::parse) { event(Relation.ZAPPED, it, ETag.TAG_NAME, props) }
         each(e.tags, ATag::parse) { address(Relation.ZAPPED, it, ATag.TAG_NAME, props) }
-        each(e.tags, BitcoinTxIdTag::parseScope) { tag(Relation.TAG, BitcoinTxIdTag.TAG_NAME, it) }
-        each(e.tags, KindTag::parse) { tag(Relation.TAG, KindTag.TAG_NAME, it.toString()) }
+        each(e.tags, BitcoinTxIdTag::parseScope) { value(Relation.TRANSACTION, ValueType.BITCOIN_TX, it, BitcoinTxIdTag.TAG_NAME) }
+        each(e.tags, KindTag::parse) { value(Relation.ZAPPED_KIND, ValueType.KIND, it.toString(), KindTag.TAG_NAME) }
     }
 }

@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.quartz.nip25Reactions.ExternalReactionEvent
 import com.vitorpamplona.quartz.nip25Reactions.ReactionEvent
 import kotlin.test.Test
@@ -65,7 +66,7 @@ class Nip25ReactionsLinksTest {
                 Link(Relation.REACTED_AUTHOR, LinkTarget.User(targetAuthor), "p"),
                 Link(Relation.MENTION, LinkTarget.Event(threadRoot), "e"),
                 Link(Relation.MENTION, LinkTarget.User(rootAuthor), "p"),
-                Link(Relation.TAG, LinkTarget.Tag("k", "1"), "k"),
+                Link(Relation.REACTED_KIND, LinkTarget.Tag(ValueType.KIND, "1"), "k"),
             ),
             event.links(),
         )
@@ -117,10 +118,10 @@ class Nip25ReactionsLinksTest {
 
         assertEquals(
             listOf(
-                Link(Relation.REACTED, LinkTarget.Tag("i", "podcast:guid:c90e609a"), "i"),
-                Link(Relation.REACTED, LinkTarget.Tag("i", "podcast:item:guid:d98d189b"), "i"),
-                Link(Relation.TAG, LinkTarget.Tag("k", "podcast:guid"), "k"),
-                Link(Relation.TAG, LinkTarget.Tag("k", "podcast:item:guid"), "k"),
+                Link(Relation.REACTED, LinkTarget.Tag(ValueType.EXTERNAL, "podcast:guid:c90e609a"), "i"),
+                Link(Relation.REACTED, LinkTarget.Tag(ValueType.EXTERNAL, "podcast:item:guid:d98d189b"), "i"),
+                Link(Relation.REACTED_KIND, LinkTarget.Tag(ValueType.KIND, "podcast:guid"), "k"),
+                Link(Relation.REACTED_KIND, LinkTarget.Tag(ValueType.KIND, "podcast:item:guid"), "k"),
             ),
             event.links(),
         )
@@ -148,7 +149,7 @@ class Nip25ReactionsLinksTest {
                 Link(Relation.REACTED, LinkTarget.Event(target), "e"),
                 Link(Relation.REACTED_AUTHOR, LinkTarget.User(targetAuthor), "e"),
                 Link(Relation.MENTION, LinkTarget.Event(threadRoot), "e"),
-                Link(Relation.TAG, LinkTarget.Tag("k", "1"), "k"),
+                Link(Relation.REACTED_KIND, LinkTarget.Tag(ValueType.KIND, "1"), "k"),
             ),
             event.links(),
         )

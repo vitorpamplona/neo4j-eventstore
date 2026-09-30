@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.quartz.nipB0WebBookmarks.WebBookmarkEvent
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -39,8 +40,8 @@ class NipB0WebBookmarksLinksTest {
         val event = WebBookmarkEvent(id, author, 1, arrayOf(arrayOf("d", "example.com/page"), arrayOf("t", "Read")), "", sig)
         assertEquals(
             listOf(
-                Link(Relation.BOOKMARK, LinkTarget.Tag("r", "https://example.com/page"), "d"),
-                Link(Relation.HASHTAG, LinkTarget.Tag("t", "read"), "t"),
+                Link(Relation.BOOKMARK, LinkTarget.Tag(ValueType.URL, "https://example.com/page"), "d"),
+                Link(Relation.HASHTAG, LinkTarget.Tag(ValueType.HASHTAG, "read"), "t"),
             ),
             event.links(),
         )

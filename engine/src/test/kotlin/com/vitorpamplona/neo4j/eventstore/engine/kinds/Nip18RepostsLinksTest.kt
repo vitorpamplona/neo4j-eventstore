@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.quartz.nip18Reposts.GenericRepostEvent
 import com.vitorpamplona.quartz.nip18Reposts.RepostEvent
 import kotlin.test.Test
@@ -63,7 +64,7 @@ class Nip18RepostsLinksTest {
                 Link(Relation.REPOSTED_AUTHOR, LinkTarget.User(author), "p"),
                 Link(Relation.MENTION, LinkTarget.Event(earlier), "e"),
                 Link(Relation.MENTION, LinkTarget.User(bystander), "p"),
-                Link(Relation.TAG, LinkTarget.Tag("k", "1"), "k"),
+                Link(Relation.REPOSTED_KIND, LinkTarget.Tag(ValueType.KIND, "1"), "k"),
             ),
             event.links(),
         )
@@ -91,7 +92,7 @@ class Nip18RepostsLinksTest {
                 Link(Relation.REPOSTED, LinkTarget.Event(reposted), "e"),
                 Link(Relation.REPOSTED, LinkTarget.Address(address), "a"),
                 Link(Relation.REPOSTED_AUTHOR, LinkTarget.User(author), "p"),
-                Link(Relation.TAG, LinkTarget.Tag("k", "30023"), "k"),
+                Link(Relation.REPOSTED_KIND, LinkTarget.Tag(ValueType.KIND, "30023"), "k"),
             ),
             event.links(),
         )

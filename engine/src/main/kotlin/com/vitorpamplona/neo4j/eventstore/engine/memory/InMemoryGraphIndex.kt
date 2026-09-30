@@ -259,7 +259,7 @@ class InMemoryGraphIndex(
             for (id in stubs) nodes += NodeView(Labels.EVENT, id, false, emptyMap())
             for (pk in users) nodes += NodeView(Labels.USER, pk, false, emptyMap())
             for ((id, key) in addresses) nodes += NodeView(Labels.ADDRESS, id, false, addressProps(key))
-            for ((key, nv) in tagNodes) nodes += NodeView(Labels.TAG, key, false, mapOf("name" to nv.first, "value" to nv.second))
+            for ((key, nv) in tagNodes) nodes += NodeView(Labels.TAG, key, false, mapOf("type" to nv.first, "value" to nv.second))
 
             val edges = HashSet<EdgeRow>()
             for (doc in held.values) {

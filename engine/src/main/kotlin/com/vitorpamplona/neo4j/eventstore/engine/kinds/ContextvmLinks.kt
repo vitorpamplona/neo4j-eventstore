@@ -21,6 +21,7 @@
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.quartz.contextvm.cep06Announcements.CvmServerAnnouncementEvent
 import com.vitorpamplona.quartz.contextvm.cep06Announcements.CvmToolsListEvent
@@ -32,7 +33,9 @@ internal fun KindMappers.Builder.contextvm() {
     // CEP-15 common tool schemas, written NIP-73 style: `["i", <schema-hash>, <tool>]` and
     // `["k", "io.contextvm/common-schema"]`. The tool list itself is JSON content.
     on<CvmToolsListEvent> { e ->
-        each(e.tags, ContextvmSchemaHashTag::parse) { tag(Relation.TAG, ContextvmSchemaHashTag.TAG_NAME, it) }
-        each(e.tags, ContextvmSchemaNamespaceTag::parse) { tag(Relation.TAG, ContextvmSchemaNamespaceTag.TAG_NAME, it) }
+        each(e.tags, ContextvmSchemaHashTag::parse) { value(Relation.SCHEMA, ValueType.SCHEMA_HASH, it, ContextvmSchemaHashTag.TAG_NAME) }
+        each(e.tags, ContextvmSchemaNamespaceTag::parse) {
+            value(Relation.SCHEMA_NAMESPACE, ValueType.SCHEMA_NAMESPACE, it, ContextvmSchemaNamespaceTag.TAG_NAME)
+        }
     }
 }

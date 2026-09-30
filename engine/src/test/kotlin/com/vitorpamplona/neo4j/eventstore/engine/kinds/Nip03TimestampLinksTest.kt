@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.quartz.nip03Timestamp.OtsEvent
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -48,7 +49,7 @@ class Nip03TimestampLinksTest {
         assertEquals(
             listOf(
                 Link(Relation.TIMESTAMPED, LinkTarget.Event(target), "e"),
-                Link(Relation.TAG, LinkTarget.Tag("k", "1"), "k"),
+                Link(Relation.TIMESTAMPED_KIND, LinkTarget.Tag(ValueType.KIND, "1"), "k"),
             ),
             event.links(),
         )

@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.ZapProps
 import com.vitorpamplona.quartz.nipB1Bolt12Zaps.intent.Bolt12ZapIntentEvent
 import com.vitorpamplona.quartz.nipB1Bolt12Zaps.zap.Bolt12ZapEvent
@@ -61,7 +62,7 @@ class NipB1Bolt12ZapsLinksTest {
                 Link(Relation.ZAP_RECIPIENT, LinkTarget.User(recipient), "p", msats),
                 Link(Relation.ZAP_SENDER, LinkTarget.User(payer), "P"),
                 Link(Relation.ZAPPED, LinkTarget.Event(zapped), "e", msats),
-                Link(Relation.TAG, LinkTarget.Tag("k", "1"), "k"),
+                Link(Relation.ZAPPED_KIND, LinkTarget.Tag(ValueType.KIND, "1"), "k"),
             ),
             event.links(),
         )
@@ -84,7 +85,7 @@ class NipB1Bolt12ZapsLinksTest {
             listOf(
                 Link(Relation.ZAP_RECIPIENT, LinkTarget.User(recipient), "p", msats),
                 Link(Relation.ZAPPED, LinkTarget.Address(article), "a", msats),
-                Link(Relation.TAG, LinkTarget.Tag("k", "30023"), "k"),
+                Link(Relation.ZAPPED_KIND, LinkTarget.Tag(ValueType.KIND, "30023"), "k"),
             ),
             event.links(),
         )

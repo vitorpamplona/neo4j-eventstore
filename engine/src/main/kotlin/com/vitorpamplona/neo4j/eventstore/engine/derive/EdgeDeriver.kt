@@ -97,15 +97,30 @@ class EdgeDeriver(
     // Targets arrive in key form: LinkBuilder lowercased and validated every id, key and address.
     private fun nodeRef(target: LinkTarget): NodeRef? =
         when (target) {
-            is LinkTarget.Event -> NodeRef(NodeKind.EVENT, target.id)
+            is LinkTarget.Event -> {
+                NodeRef(NodeKind.EVENT, target.id)
+            }
 
-            is LinkTarget.User -> NodeRef(NodeKind.USER, target.pubkey)
+            is LinkTarget.User -> {
+                NodeRef(NodeKind.USER, target.pubkey)
+            }
 
-            is LinkTarget.Address -> NodeRef(NodeKind.ADDRESS, target.value)
+            is LinkTarget.Address -> {
+                NodeRef(NodeKind.ADDRESS, target.value)
+            }
 
             // A `:Tag` key sits behind a uniqueness constraint: an unbounded value would fail the
             // event's transaction on every retry, and a long one is no value to join on anyway.
-            is LinkTarget.Tag -> if (policy.fitsTagNode(target.value)) NodeRef(NodeKind.TAG, target.name + ":" + target.value) else null
+            is LinkTarget.Tag -> {
+                if (policy.fitsTagNode(
+                        target.value,
+                    )
+                ) {
+                    NodeRef(NodeKind.TAG, target.type.code + ":" + target.value)
+                } else {
+                    null
+                }
+            }
         }
 
     /**

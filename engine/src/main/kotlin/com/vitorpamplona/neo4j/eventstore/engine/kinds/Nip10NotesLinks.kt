@@ -21,6 +21,7 @@
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.quartz.nip01Core.tags.geohash.GeoHashTag
 import com.vitorpamplona.quartz.nip01Core.tags.people.PTag
@@ -89,8 +90,8 @@ internal fun KindMappers.Builder.nip10Notes() {
             }
         }
         hashtags(e.tags)
-        each(e.tags, ReferenceTag::parse) { tag(Relation.TAG, ReferenceTag.TAG_NAME, it) }
-        each(e.tags, GeoHashTag::parse) { tag(Relation.TAG, GeoHashTag.TAG_NAME, it) }
+        each(e.tags, ReferenceTag::parse) { value(Relation.REFERENCE, ValueType.URL, it, ReferenceTag.TAG_NAME) }
+        each(e.tags, GeoHashTag::parse) { value(Relation.LOCATION, ValueType.GEOHASH, it, GeoHashTag.TAG_NAME) }
 
         contentMentions(e.content)
     }

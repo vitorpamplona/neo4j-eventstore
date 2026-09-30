@@ -57,7 +57,7 @@ class DerivationRegressionsTest {
     fun aTagValueCarryingAnNsecIsNotATagNode() {
         val nsec = hex("secret").hexToByteArray().toNsec()
         val doc = deriver.derive(event(1, ALICE, listOf(listOf("t", nsec), listOf("r", "https://x.example/?k=$nsec"), listOf("t", "fine"))))
-        assertEquals(listOf("t:fine"), doc.edges.filter { it.target.kind == NodeKind.TAG }.map { it.target.key })
+        assertEquals(listOf("hashtag:fine"), doc.edges.filter { it.target.kind == NodeKind.TAG }.map { it.target.key })
     }
 
     @Test

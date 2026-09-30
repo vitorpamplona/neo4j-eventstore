@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.VoteProps
 import com.vitorpamplona.quartz.buzz.cwChannelWindow.ThreadSummaryEvent
 import com.vitorpamplona.quartz.buzz.cwChannelWindow.WindowBoundsEvent
@@ -62,7 +63,7 @@ class BuzzLinksTest {
     private val e2 = "e2".repeat(32)
     private val channel = "7c1f0e2a-3b4d-4e5f-8a9b-0c1d2e3f4a5b"
 
-    private val group = Link(Relation.GROUP, LinkTarget.Tag("h", channel), "h")
+    private val group = Link(Relation.GROUP, LinkTarget.Tag(ValueType.GROUP, channel), "h")
 
     @Test
     fun streamMessageNestedReply() {
@@ -145,7 +146,7 @@ class BuzzLinksTest {
     }
 
     @Test
-    fun diffLanguageIsAPlainTagNotALabel() {
+    fun diffLanguageIsALanguageNotALabel() {
         val event =
             StreamMessageDiffEvent(
                 id,
@@ -160,7 +161,7 @@ class BuzzLinksTest {
                 "--- a\n+++ b",
                 sig,
             )
-        assertEquals(listOf(group, Link(Relation.TAG, LinkTarget.Tag("l", "kotlin"), "l")), event.links())
+        assertEquals(listOf(group, Link(Relation.LANGUAGE, LinkTarget.Tag(ValueType.LANGUAGE, "kotlin"), "l")), event.links())
     }
 
     @Test
@@ -270,7 +271,7 @@ class BuzzLinksTest {
         )
         assertEquals(
             listOf(
-                Link(Relation.GROUP, LinkTarget.Tag("h", channel), "d"),
+                Link(Relation.GROUP, LinkTarget.Tag(ValueType.GROUP, channel), "d"),
                 Link(Relation.PARTICIPANT, LinkTarget.User(p1), "p"),
             ),
             DmCreatedEvent(id, author, 0, arrayOf(arrayOf("d", channel), arrayOf("p", p1)), "", sig).links(),
@@ -284,7 +285,7 @@ class BuzzLinksTest {
             DmAddMemberEvent(id, author, 0, arrayOf(arrayOf("h", channel), arrayOf("p", p1)), "", sig).links(),
         )
         assertEquals(
-            listOf(Link(Relation.HIDDEN, LinkTarget.Tag("h", channel), "h")),
+            listOf(Link(Relation.HIDDEN, LinkTarget.Tag(ValueType.GROUP, channel), "h")),
             DmHideEvent(id, author, 0, arrayOf(arrayOf("h", channel)), "", sig).links(),
         )
     }
@@ -303,8 +304,8 @@ class BuzzLinksTest {
         assertEquals(
             listOf(
                 Link(Relation.VIEWER, LinkTarget.User(p1), "p"),
-                Link(Relation.HIDDEN, LinkTarget.Tag("h", channel), "h"),
-                Link(Relation.HIDDEN, LinkTarget.Tag("h", "other"), "h"),
+                Link(Relation.HIDDEN, LinkTarget.Tag(ValueType.GROUP, channel), "h"),
+                Link(Relation.HIDDEN, LinkTarget.Tag(ValueType.GROUP, "other"), "h"),
             ),
             event.links(),
         )

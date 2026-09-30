@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.quartz.nip94FileMetadata.FileMetadataEvent
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -43,6 +44,6 @@ class Nip94FileMetadataLinksTest {
                 "",
                 sig,
             )
-        assertEquals(listOf(Link(Relation.TAG, LinkTarget.Tag("i", "infohash"), "i")), event.links())
+        assertEquals(listOf(Link(Relation.TORRENT, LinkTarget.Tag(ValueType.TORRENT, "infohash"), "i")), event.links())
     }
 }

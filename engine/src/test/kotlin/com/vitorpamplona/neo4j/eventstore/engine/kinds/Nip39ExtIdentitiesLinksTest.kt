@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.quartz.nip39ExtIdentities.ExternalIdentitiesEvent
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -44,8 +45,8 @@ class Nip39ExtIdentitiesLinksTest {
             )
         assertEquals(
             listOf(
-                Link(Relation.TAG, LinkTarget.Tag("i", "github:semisol"), "i"),
-                Link(Relation.TAG, LinkTarget.Tag("i", "twitter:semisol_public"), "i"),
+                Link(Relation.IDENTITY, LinkTarget.Tag(ValueType.IDENTITY, "github:semisol"), "i"),
+                Link(Relation.IDENTITY, LinkTarget.Tag(ValueType.IDENTITY, "twitter:semisol_public"), "i"),
             ),
             event.links(),
         )

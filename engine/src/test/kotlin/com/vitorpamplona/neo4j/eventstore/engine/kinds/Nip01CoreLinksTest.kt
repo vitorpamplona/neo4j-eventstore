@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.quartz.nip01Core.metadata.MetadataEvent
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -46,8 +47,8 @@ class Nip01CoreLinksTest {
 
         assertEquals(
             listOf(
-                Link(Relation.TAG, LinkTarget.Tag("i", "github:vitorpamplona"), "i"),
-                Link(Relation.TAG, LinkTarget.Tag("i", "twitter:vitorpamplona"), "i"),
+                Link(Relation.IDENTITY, LinkTarget.Tag(ValueType.IDENTITY, "github:vitorpamplona"), "i"),
+                Link(Relation.IDENTITY, LinkTarget.Tag(ValueType.IDENTITY, "twitter:vitorpamplona"), "i"),
             ),
             event.links(),
         )

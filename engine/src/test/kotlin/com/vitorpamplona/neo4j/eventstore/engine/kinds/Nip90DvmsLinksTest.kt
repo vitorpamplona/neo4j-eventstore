@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.quartz.nip90Dvms.contentDiscoveryRequest.DvmContentDiscoveryRequestEvent
 import com.vitorpamplona.quartz.nip90Dvms.contentDiscoveryResponse.DvmContentDiscoveryResponseEvent
 import com.vitorpamplona.quartz.nip90Dvms.contentSearch.DvmContentSearchRequestEvent
@@ -69,7 +70,7 @@ class Nip90DvmsLinksTest {
             listOf(
                 Link(Relation.INPUT, LinkTarget.Event(inputEvent), "i"),
                 Link(Relation.INPUT_JOB, LinkTarget.Event(inputJob), "i"),
-                Link(Relation.TAG, LinkTarget.Tag("i", "https://example.com/talk.mp3"), "i"),
+                Link(Relation.INPUT, LinkTarget.Tag(ValueType.URL, "https://example.com/talk.mp3"), "i"),
                 Link(Relation.SERVICE_PROVIDER, LinkTarget.User(dvm), "p"),
             ),
             event.links(),

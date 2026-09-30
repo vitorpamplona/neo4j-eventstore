@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.RoleProps
 import com.vitorpamplona.quartz.nip19Bech32.toNpub
 import com.vitorpamplona.quartz.nip84Highlights.HighlightEvent
@@ -92,9 +93,9 @@ class Nip84HighlightsLinksTest {
 
         assertEquals(
             listOf(
-                Link(Relation.HIGHLIGHTED, LinkTarget.Tag("r", "https://example.com/essay"), "r"),
-                Link(Relation.TAG, LinkTarget.Tag("r", "https://example.com/cited"), "r"),
-                Link(Relation.HIGHLIGHTED, LinkTarget.Tag("i", "isbn:9780765382030"), "i"),
+                Link(Relation.HIGHLIGHTED, LinkTarget.Tag(ValueType.URL, "https://example.com/essay"), "r"),
+                Link(Relation.MENTION, LinkTarget.Tag(ValueType.URL, "https://example.com/cited"), "r"),
+                Link(Relation.HIGHLIGHTED, LinkTarget.Tag(ValueType.EXTERNAL, "isbn:9780765382030"), "i"),
             ),
             event.links(),
         )

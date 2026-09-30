@@ -21,6 +21,7 @@
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.quartz.nip01Core.tags.kinds.KindTag
 import com.vitorpamplona.quartz.nip87Ecash.cashu.CashuMintEvent
@@ -35,7 +36,7 @@ internal fun KindMappers.Builder.nip87Ecash() {
             e.tags,
             Nip87RecommendedMintTag::parse,
         ) { address(Relation.RECOMMENDED, it.address, Nip87RecommendedMintTag.TAG_NAME, it.linkProps()) }
-        each(e.tags, KindTag::parse) { tag(Relation.TAG, KindTag.TAG_NAME, it.toString()) }
+        each(e.tags, KindTag::parse) { value(Relation.RECOMMENDED_KIND, ValueType.KIND, it.toString(), KindTag.TAG_NAME) }
     }
 
     free<CashuMintEvent>()

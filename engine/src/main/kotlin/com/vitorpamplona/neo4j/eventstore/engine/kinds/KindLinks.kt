@@ -136,8 +136,8 @@ object KindLinks {
      */
     fun of(event: Event): List<Link<*>> =
         links {
-            user(Relation.AUTHOR, event.pubKey)
-            ownAddress(event)?.let { address(Relation.ADDRESS, it) }
+            envelopeAuthor(event.pubKey)
+            envelopeAddress(ownAddress(event))
             everyKindLinks(event.tags)
             mappers.mapperFor(event.javaClass)?.let { mapper ->
                 try {

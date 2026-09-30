@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.quartz.nip35Torrents.TorrentCommentEvent
 import com.vitorpamplona.quartz.nip35Torrents.TorrentEvent
 import kotlin.test.Test
@@ -60,11 +61,11 @@ class Nip35TorrentsLinksTest {
             )
         assertEquals(
             listOf(
-                Link(Relation.TAG, LinkTarget.Tag("i", "imdb:tt0000001"), "i"),
-                Link(Relation.HASHTAG, LinkTarget.Tag("t", "movie"), "t"),
+                Link(Relation.ABOUT, LinkTarget.Tag(ValueType.EXTERNAL, "imdb:tt0000001"), "i"),
+                Link(Relation.HASHTAG, LinkTarget.Tag(ValueType.HASHTAG, "movie"), "t"),
                 Link(Relation.QUOTE, LinkTarget.Event(quoted), "q"),
                 Link(Relation.MENTION, LinkTarget.User(other), "p"),
-                Link(Relation.TAG, LinkTarget.Tag("r", "https://example.com"), "r"),
+                Link(Relation.REFERENCE, LinkTarget.Tag(ValueType.URL, "https://example.com"), "r"),
             ),
             event.links(),
         )

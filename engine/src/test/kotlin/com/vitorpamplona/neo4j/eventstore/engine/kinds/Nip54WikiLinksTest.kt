@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.quartz.nip19Bech32.entities.NEvent
 import com.vitorpamplona.quartz.nip54Wiki.WikiArticleEvent
 import com.vitorpamplona.quartz.nip54Wiki.WikiMergeAcceptanceEvent
@@ -123,7 +124,7 @@ class Nip54WikiLinksTest {
                 Link(Relation.MENTION, LinkTarget.Event(source), "e"),
                 Link(Relation.MENTION, LinkTarget.User(cited), "p"),
                 Link(Relation.QUOTE, LinkTarget.Event(result), "q"),
-                Link(Relation.HASHTAG, LinkTarget.Tag("t", "wiki"), "t"),
+                Link(Relation.HASHTAG, LinkTarget.Tag(ValueType.HASHTAG, "wiki"), "t"),
                 Link(Relation.MENTION, LinkTarget.Event(request), Link.VIA_CONTENT),
             ),
             event.links(),

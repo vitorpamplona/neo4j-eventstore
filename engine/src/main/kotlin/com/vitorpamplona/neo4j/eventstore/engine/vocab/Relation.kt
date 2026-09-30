@@ -76,7 +76,11 @@ import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.ZapSplitProps
  */
 class Relation<P : LinkProps>(
     val name: String,
+    vararg targets: Target,
 ) {
+    /** What a link of this relation may point at ([Target]); [LinkBuilder] refuses anything else. */
+    val targets: Set<Target> = targets.toSet()
+
     override fun equals(other: Any?) = other is Relation<*> && other.name == name
 
     override fun hashCode() = name.hashCode()
@@ -85,204 +89,237 @@ class Relation<P : LinkProps>(
 
     companion object {
         // Authorship and identity
-        val AUTHOR = Relation<NoProps>("AUTHOR")
-        val ADDRESS = Relation<NoProps>("ADDRESS")
+        val AUTHOR = Relation<NoProps>("AUTHOR", NodeTarget.USER)
+        val ADDRESS = Relation<NoProps>("ADDRESS", NodeTarget.ADDRESS)
 
         // Conversation
-        val ROOT = Relation<NoProps>("ROOT")
-        val PARENT = Relation<NoProps>("PARENT")
-        val ROOT_AUTHOR = Relation<NoProps>("ROOT_AUTHOR")
-        val PARENT_AUTHOR = Relation<NoProps>("PARENT_AUTHOR")
-        val MENTION = Relation<NoProps>("MENTION")
-        val QUOTE = Relation<NoProps>("QUOTE")
-        val FORK = Relation<NoProps>("FORK")
-        val EDITED = Relation<NoProps>("EDITED")
-        val EDITED_AUTHOR = Relation<NoProps>("EDITED_AUTHOR")
-        val RECIPIENT = Relation<FrameProps>("RECIPIENT")
-        val COMMUNITY = Relation<NoProps>("COMMUNITY")
-        val REPOSITORY = Relation<NoProps>("REPOSITORY")
-        val REPOSITORY_OWNER = Relation<NoProps>("REPOSITORY_OWNER")
+        val ROOT = Relation<NoProps>("ROOT", NodeTarget.EVENT, NodeTarget.ADDRESS, *ValueType.EXTERNAL_CONTENT)
+        val PARENT = Relation<NoProps>("PARENT", NodeTarget.EVENT, NodeTarget.ADDRESS, ValueType.GROUP, *ValueType.EXTERNAL_CONTENT)
+        val ROOT_AUTHOR = Relation<NoProps>("ROOT_AUTHOR", NodeTarget.USER)
+        val PARENT_AUTHOR = Relation<NoProps>("PARENT_AUTHOR", NodeTarget.USER)
+        val MENTION = Relation<NoProps>("MENTION", NodeTarget.EVENT, NodeTarget.ADDRESS, NodeTarget.USER, *ValueType.EXTERNAL_CONTENT)
+        val QUOTE = Relation<NoProps>("QUOTE", NodeTarget.EVENT, NodeTarget.ADDRESS)
+        val FORK = Relation<NoProps>("FORK", NodeTarget.EVENT, NodeTarget.ADDRESS)
+        val EDITED = Relation<NoProps>("EDITED", NodeTarget.EVENT)
+        val EDITED_AUTHOR = Relation<NoProps>("EDITED_AUTHOR", NodeTarget.USER)
+        val RECIPIENT = Relation<FrameProps>("RECIPIENT", NodeTarget.USER)
+        val COMMUNITY = Relation<NoProps>("COMMUNITY", NodeTarget.ADDRESS)
+        val REPOSITORY = Relation<NoProps>("REPOSITORY", NodeTarget.ADDRESS, ValueType.GIT_COMMIT)
+        val REPOSITORY_OWNER = Relation<NoProps>("REPOSITORY_OWNER", NodeTarget.USER)
 
         // Reactions, reposts, zaps
-        val REACTED = Relation<NoProps>("REACTED")
-        val REACTED_AUTHOR = Relation<NoProps>("REACTED_AUTHOR")
-        val REPOSTED = Relation<NoProps>("REPOSTED")
-        val REPOSTED_AUTHOR = Relation<NoProps>("REPOSTED_AUTHOR")
-        val ZAPPED = Relation<ZapProps>("ZAPPED")
-        val ZAP_RECIPIENT = Relation<ZapProps>("ZAP_RECIPIENT")
-        val ZAP_SENDER = Relation<NoProps>("ZAP_SENDER")
-        val ZAP_REQUEST = Relation<NoProps>("ZAP_REQUEST")
-        val HIGHLIGHTED = Relation<NoProps>("HIGHLIGHTED")
-        val HIGHLIGHTED_AUTHOR = Relation<RoleProps>("HIGHLIGHTED_AUTHOR")
+        val REACTED = Relation<NoProps>("REACTED", NodeTarget.EVENT, NodeTarget.ADDRESS, *ValueType.EXTERNAL_CONTENT)
+        val REACTED_AUTHOR = Relation<NoProps>("REACTED_AUTHOR", NodeTarget.USER)
+        val REPOSTED = Relation<NoProps>("REPOSTED", NodeTarget.EVENT, NodeTarget.ADDRESS)
+        val REPOSTED_AUTHOR = Relation<NoProps>("REPOSTED_AUTHOR", NodeTarget.USER)
+        val ZAPPED = Relation<ZapProps>("ZAPPED", NodeTarget.EVENT, NodeTarget.ADDRESS)
+        val ZAP_RECIPIENT = Relation<ZapProps>("ZAP_RECIPIENT", NodeTarget.USER)
+        val ZAP_SENDER = Relation<NoProps>("ZAP_SENDER", NodeTarget.USER)
+        val HIGHLIGHTED = Relation<NoProps>("HIGHLIGHTED", NodeTarget.EVENT, NodeTarget.ADDRESS, *ValueType.EXTERNAL_CONTENT)
+        val HIGHLIGHTED_AUTHOR = Relation<RoleProps>("HIGHLIGHTED_AUTHOR", NodeTarget.USER)
 
         /**
          * A `nostr:` reference inside text the event QUOTES rather than writes (a highlight's
          * excerpt): the quoted author named it, so it is not the event author's `MENTION`.
          */
-        val CITED = Relation<NoProps>("CITED")
-        val RATED = Relation<RatingProps>("RATED")
-        val RATED_AUTHOR = Relation<RatingProps>("RATED_AUTHOR")
+        val CITED = Relation<NoProps>("CITED", NodeTarget.EVENT, NodeTarget.ADDRESS, NodeTarget.USER)
+        val RATED =
+            Relation<RatingProps>("RATED", NodeTarget.EVENT, NodeTarget.ADDRESS, NodeTarget.USER, ValueType.EXTERNAL, ValueType.HASHTAG)
+        val RATED_AUTHOR = Relation<RatingProps>("RATED_AUTHOR", NodeTarget.USER)
 
         // Moderation
-        val DELETED = Relation<NoProps>("DELETED")
-        val DELETED_AUTHOR = Relation<NoProps>("DELETED_AUTHOR")
-        val REPORTED_USER = Relation<ReportProps>("REPORTED_USER")
-        val REPORTED = Relation<ReportProps>("REPORTED")
-        val REPORTED_AUTHOR = Relation<ReportProps>("REPORTED_AUTHOR")
-        val LABELED = Relation<LabelProps>("LABELED")
-        val MUTE = Relation<MuteProps>("MUTE")
-        val HIDDEN = Relation<NoProps>("HIDDEN")
-        val CHANNEL_MUTED = Relation<NoProps>("CHANNEL_MUTED")
-        val APPROVED = Relation<NoProps>("APPROVED")
-        val APPROVED_AUTHOR = Relation<NoProps>("APPROVED_AUTHOR")
-        val MODERATOR = Relation<NoProps>("MODERATOR")
+        val DELETED = Relation<NoProps>("DELETED", NodeTarget.EVENT, NodeTarget.ADDRESS)
+        val DELETED_AUTHOR = Relation<NoProps>("DELETED_AUTHOR", NodeTarget.USER)
+        val REPORTED_USER = Relation<ReportProps>("REPORTED_USER", NodeTarget.USER)
+        val REPORTED = Relation<ReportProps>("REPORTED", NodeTarget.EVENT, NodeTarget.ADDRESS, ValueType.SHA256)
+        val REPORTED_AUTHOR = Relation<ReportProps>("REPORTED_AUTHOR", NodeTarget.USER)
+        val LABELED =
+            Relation<LabelProps>("LABELED", NodeTarget.EVENT, NodeTarget.ADDRESS, NodeTarget.USER, ValueType.HASHTAG, ValueType.URL)
+        val MUTE = Relation<MuteProps>("MUTE", NodeTarget.EVENT, NodeTarget.USER, ValueType.HASHTAG, ValueType.WORD)
+        val HIDDEN = Relation<NoProps>("HIDDEN", NodeTarget.EVENT, ValueType.GROUP)
+        val CHANNEL_MUTED = Relation<NoProps>("CHANNEL_MUTED", NodeTarget.USER)
+        val APPROVED = Relation<NoProps>("APPROVED", NodeTarget.EVENT, NodeTarget.ADDRESS)
+        val APPROVED_AUTHOR = Relation<NoProps>("APPROVED_AUTHOR", NodeTarget.USER)
+        val MODERATOR = Relation<NoProps>("MODERATOR", NodeTarget.USER)
 
         // Social graph and lists
-        val FOLLOW = Relation<NoProps>("FOLLOW")
-        val SUBSCRIBED = Relation<NoProps>("SUBSCRIBED")
-        val FAVORITE = Relation<NoProps>("FAVORITE")
-        val MEMBER = Relation<MemberProps>("MEMBER")
-        val RECOMMENDED = Relation<PlatformProps>("RECOMMENDED")
-        val BOOKMARK = Relation<NoProps>("BOOKMARK")
-        val CURATED = Relation<OrderProps>("CURATED")
-        val PIN = Relation<OrderProps>("PIN")
+        val FOLLOW = Relation<NoProps>("FOLLOW", NodeTarget.USER)
+        val SUBSCRIBED =
+            Relation<NoProps>(
+                "SUBSCRIBED",
+                NodeTarget.EVENT,
+                NodeTarget.ADDRESS,
+                NodeTarget.USER,
+                ValueType.GEOHASH,
+                ValueType.GROUP,
+                ValueType.HASHTAG,
+            )
+        val FAVORITE = Relation<NoProps>("FAVORITE", NodeTarget.ADDRESS, NodeTarget.USER)
+        val MEMBER = Relation<MemberProps>("MEMBER", NodeTarget.EVENT, NodeTarget.ADDRESS, NodeTarget.USER, *ValueType.EXTERNAL_CONTENT)
+        val RECOMMENDED = Relation<PlatformProps>("RECOMMENDED", NodeTarget.ADDRESS, NodeTarget.USER)
+        val BOOKMARK = Relation<NoProps>("BOOKMARK", NodeTarget.EVENT, NodeTarget.ADDRESS, ValueType.URL)
+        val CURATED = Relation<OrderProps>("CURATED", NodeTarget.EVENT, NodeTarget.ADDRESS)
+        val PIN = Relation<OrderProps>("PIN", NodeTarget.EVENT, NodeTarget.ADDRESS)
 
         // Badges (NIP-58)
-        val AWARDED = Relation<NoProps>("AWARDED")
-        val BADGE_DEFINITION = Relation<NoProps>("BADGE_DEFINITION")
-        val BADGE_AWARD = Relation<NoProps>("BADGE_AWARD")
-        val BADGE_SET = Relation<NoProps>("BADGE_SET")
+        val AWARDED = Relation<NoProps>("AWARDED", NodeTarget.USER)
+        val BADGE_DEFINITION = Relation<NoProps>("BADGE_DEFINITION", NodeTarget.ADDRESS)
+        val BADGE_AWARD = Relation<NoProps>("BADGE_AWARD", NodeTarget.EVENT)
+        val BADGE_SET = Relation<NoProps>("BADGE_SET", NodeTarget.ADDRESS)
 
         // Trust (NIP-85)
-        val SUBJECT = Relation<SubjectProps>("SUBJECT")
-        val SERVICE_PROVIDER = Relation<ServiceProps>("SERVICE_PROVIDER")
+        val SUBJECT = Relation<SubjectProps>("SUBJECT", NodeTarget.EVENT, NodeTarget.ADDRESS, NodeTarget.USER, *ValueType.EXTERNAL_CONTENT)
+        val SERVICE_PROVIDER = Relation<ServiceProps>("SERVICE_PROVIDER", NodeTarget.USER)
 
         // Events, calendars, live activities, markets
-        val PARTICIPANT = Relation<ParticipantProps>("PARTICIPANT")
-        val CALENDAR_EVENT = Relation<RsvpProps>("CALENDAR_EVENT")
-        val CALENDAR_EVENT_AUTHOR = Relation<NoProps>("CALENDAR_EVENT_AUTHOR")
-        val CALENDAR = Relation<NoProps>("CALENDAR")
-        val RAIDED = Relation<NoProps>("RAIDED")
-        val CLIPPED = Relation<NoProps>("CLIPPED")
-        val CLIPPED_AUTHOR = Relation<NoProps>("CLIPPED_AUTHOR")
-        val POLL = Relation<PollResponseProps>("POLL")
-        val POLL_AUTHOR = Relation<NoProps>("POLL_AUTHOR")
-        val AUCTION = Relation<AuctionProps>("AUCTION")
-        val AUCTION_AUTHOR = Relation<NoProps>("AUCTION_AUTHOR")
-        val BID = Relation<BidProps>("BID")
-        val BID_AUTHOR = Relation<NoProps>("BID_AUTHOR")
-        val TIMESTAMPED = Relation<NoProps>("TIMESTAMPED")
-        val REDIRECT = Relation<NoProps>("REDIRECT")
+        val PARTICIPANT = Relation<ParticipantProps>("PARTICIPANT", NodeTarget.USER)
+        val CALENDAR_EVENT = Relation<RsvpProps>("CALENDAR_EVENT", NodeTarget.EVENT, NodeTarget.ADDRESS)
+        val CALENDAR_EVENT_AUTHOR = Relation<NoProps>("CALENDAR_EVENT_AUTHOR", NodeTarget.USER)
+        val CALENDAR = Relation<NoProps>("CALENDAR", NodeTarget.ADDRESS)
+        val RAIDED = Relation<NoProps>("RAIDED", NodeTarget.ADDRESS)
+        val CLIPPED = Relation<NoProps>("CLIPPED", NodeTarget.ADDRESS)
+        val CLIPPED_AUTHOR = Relation<NoProps>("CLIPPED_AUTHOR", NodeTarget.USER)
+        val POLL = Relation<PollResponseProps>("POLL", NodeTarget.EVENT)
+        val POLL_AUTHOR = Relation<NoProps>("POLL_AUTHOR", NodeTarget.USER)
+        val AUCTION = Relation<AuctionProps>("AUCTION", NodeTarget.EVENT)
+        val AUCTION_AUTHOR = Relation<NoProps>("AUCTION_AUTHOR", NodeTarget.USER)
+        val BID = Relation<BidProps>("BID", NodeTarget.EVENT)
+        val BID_AUTHOR = Relation<NoProps>("BID_AUTHOR", NodeTarget.USER)
+        val TIMESTAMPED = Relation<NoProps>("TIMESTAMPED", NodeTarget.EVENT)
+        val REDIRECT = Relation<NoProps>("REDIRECT", NodeTarget.ADDRESS)
 
-        // Topics and plain tags
-        val HASHTAG = Relation<NoProps>("HASHTAG")
-        val TAG = Relation<NoProps>("TAG")
+        // Topics, places and other values: what the value IS to the event (rule 7), never a
+        // generic "tag". A kind value takes the role of the target it qualifies (`X_KIND`, as
+        // `X_AUTHOR` names the author of the `X` target).
+        val HASHTAG = Relation<NoProps>("HASHTAG", ValueType.HASHTAG)
+        val LOCATION = Relation<NoProps>("LOCATION", ValueType.GEOHASH)
+        val REFERENCE = Relation<NoProps>("REFERENCE", ValueType.URL)
+        val LANGUAGE = Relation<NoProps>("LANGUAGE", ValueType.LANGUAGE)
+        val LABEL = Relation<NoProps>("LABEL", ValueType.LABEL)
+        val LABEL_NAMESPACE = Relation<NoProps>("LABEL_NAMESPACE", ValueType.LABEL_NAMESPACE)
+        val IDENTITY = Relation<NoProps>("IDENTITY", ValueType.IDENTITY)
+        val SPECIES = Relation<NoProps>("SPECIES", *ValueType.EXTERNAL_CONTENT)
+        val SCHEMA = Relation<NoProps>("SCHEMA", ValueType.SCHEMA_HASH)
+        val SCHEMA_NAMESPACE = Relation<NoProps>("SCHEMA_NAMESPACE", ValueType.SCHEMA_NAMESPACE)
+        val TRANSACTION = Relation<NoProps>("TRANSACTION", ValueType.BITCOIN_TX)
+        val TORRENT = Relation<NoProps>("TORRENT", ValueType.TORRENT)
+        val KEY_PACKAGE_REF = Relation<NoProps>("KEY_PACKAGE_REF", ValueType.KEY_PACKAGE_REF)
+        val ROOT_KIND = Relation<NoProps>("ROOT_KIND", ValueType.KIND)
+        val PARENT_KIND = Relation<NoProps>("PARENT_KIND", ValueType.KIND)
+        val REACTED_KIND = Relation<NoProps>("REACTED_KIND", ValueType.KIND)
+        val REPOSTED_KIND = Relation<NoProps>("REPOSTED_KIND", ValueType.KIND)
+        val DELETED_KIND = Relation<NoProps>("DELETED_KIND", ValueType.KIND)
+        val ZAPPED_KIND = Relation<NoProps>("ZAPPED_KIND", ValueType.KIND)
+        val TIMESTAMPED_KIND = Relation<NoProps>("TIMESTAMPED_KIND", ValueType.KIND)
+        val APPROVED_KIND = Relation<NoProps>("APPROVED_KIND", ValueType.KIND)
+        val SUBJECT_KIND = Relation<NoProps>("SUBJECT_KIND", ValueType.KIND)
+        val RATED_KIND = Relation<NoProps>("RATED_KIND", ValueType.KIND)
+        val RECOMMENDED_KIND = Relation<NoProps>("RECOMMENDED_KIND", ValueType.KIND)
+        val ABOUT_KIND = Relation<NoProps>("ABOUT_KIND", ValueType.KIND)
+        val SUPPORTED_KIND = Relation<NoProps>("SUPPORTED_KIND", ValueType.KIND)
+        val ALLOWED_KIND = Relation<NoProps>("ALLOWED_KIND", ValueType.KIND)
+        val DEFINED_KIND = Relation<NoProps>("DEFINED_KIND", ValueType.KIND)
+        val DRAFT_KIND = Relation<NoProps>("DRAFT_KIND", ValueType.KIND)
 
         // Every kind: tags any event may carry
-        val CLIENT = Relation<NoProps>("CLIENT")
-        val ZAP_SPLIT = Relation<ZapSplitProps>("ZAP_SPLIT")
-        val EMOJI_SET = Relation<NoProps>("EMOJI_SET")
+        val CLIENT = Relation<NoProps>("CLIENT", NodeTarget.ADDRESS)
+        val ZAP_SPLIT = Relation<ZapSplitProps>("ZAP_SPLIT", NodeTarget.USER)
+        val EMOJI_SET = Relation<NoProps>("EMOJI_SET", NodeTarget.ADDRESS)
 
         // Added by the per-class review (see the appendix for each one's kinds and reason)
-        val ABOUT = Relation<NoProps>("ABOUT")
-        val ABOUT_AUTHOR = Relation<NoProps>("ABOUT_AUTHOR")
-        val ACCEPTED = Relation<NoProps>("ACCEPTED")
-        val ACTOR = Relation<ActorProps>("ACTOR")
-        val ADDED_USER = Relation<RoleProps>("ADDED_USER")
-        val ADMIN = Relation<RoleProps>("ADMIN")
-        val AGENT = Relation<FrameProps>("AGENT")
-        val ALLOWED = Relation<RoleProps>("ALLOWED")
-        val APP = Relation<NoProps>("APP")
-        val APPLIED = Relation<NoProps>("APPLIED")
-        val APPROVER = Relation<NoProps>("APPROVER")
-        val ARCHIVED = Relation<ModerationProps>("ARCHIVED")
-        val ASSERTION = Relation<NoProps>("ASSERTION")
-        val ATTESTOR = Relation<NoProps>("ATTESTOR")
-        val AUDITED = Relation<AuditProps>("AUDITED")
-        val AUTHORED = Relation<NoProps>("AUTHORED")
-        val BANNED = Relation<ModerationProps>("BANNED")
-        val BASE_VERSION = Relation<NoProps>("BASE_VERSION")
-        val CHILD = Relation<NoProps>("CHILD")
-        val COLLABORATED = Relation<CollaborationProps>("COLLABORATED")
-        val COLLABORATED_AUTHOR = Relation<CollaborationProps>("COLLABORATED_AUTHOR")
-        val CONCEPT_GRAPH = Relation<NoProps>("CONCEPT_GRAPH")
-        val CONFIRMED = Relation<StatusProps>("CONFIRMED")
-        val COPIED = Relation<NoProps>("COPIED")
-        val CREATED = Relation<NoProps>("CREATED")
-        val CREDITED = Relation<CreditProps>("CREDITED")
-        val CURRENT_SCENE = Relation<NoProps>("CURRENT_SCENE")
-        val DEFER = Relation<NoProps>("DEFER")
-        val DENIED = Relation<NoProps>("DENIED")
-        val DESTINATION = Relation<NoProps>("DESTINATION")
-        val DESTINATION_AUTHOR = Relation<NoProps>("DESTINATION_AUTHOR")
-        val DESTROYED = Relation<NoProps>("DESTROYED")
-        val ELEMENT_OF = Relation<NoProps>("ELEMENT_OF")
-        val EXERCISE = Relation<NoProps>("EXERCISE")
-        val FILE_DATA = Relation<NoProps>("FILE_DATA")
-        val FINDER = Relation<NoProps>("FINDER")
-        val FOR_USER = Relation<NoProps>("FOR_USER")
-        val FOUND = Relation<FoundProps>("FOUND")
-        val FUNDED = Relation<NoProps>("FUNDED")
-        val GOAL = Relation<NoProps>("GOAL")
-        val GROUP = Relation<NoProps>("GROUP")
-        val INHERIT_FROM = Relation<NoProps>("INHERIT_FROM")
-        val INPUT = Relation<NoProps>("INPUT")
-        val INPUT_JOB = Relation<NoProps>("INPUT_JOB")
-        val ITEM = Relation<ItemProps>("ITEM")
-        val KEY_PACKAGE = Relation<NoProps>("KEY_PACKAGE")
-        val KICKED = Relation<NoProps>("KICKED")
-        val LINKED = Relation<NoProps>("LINKED")
-        val MAINTAINER = Relation<NoProps>("MAINTAINER")
-        val MERCHANT = Relation<NoProps>("MERCHANT")
-        val NOTIFICATION_SERVER = Relation<NoProps>("NOTIFICATION_SERVER")
-        val OBSERVER = Relation<NoProps>("OBSERVER")
-        val OPEN_TIMESTAMP = Relation<NoProps>("OPEN_TIMESTAMP")
-        val OPPONENT = Relation<ChessResultProps>("OPPONENT")
-        val OPTION = Relation<NoProps>("OPTION")
-        val ORIGIN = Relation<NoProps>("ORIGIN")
-        val OWNER = Relation<OwnerProps>("OWNER")
-        val PALETTE = Relation<NoProps>("PALETTE")
-        val PARENT_LIST = Relation<NoProps>("PARENT_LIST")
-        val PERSONA = Relation<NoProps>("PERSONA")
-        val PODCAST_AUTHOR = Relation<RoleProps>("PODCAST_AUTHOR")
-        val PUBLICATION = Relation<NoProps>("PUBLICATION")
-        val REDEEMED = Relation<NoProps>("REDEEMED")
-        val REDEEMED_AUTHOR = Relation<NoProps>("REDEEMED_AUTHOR")
-        val RELEASE = Relation<NoProps>("RELEASE")
-        val REMINDED = Relation<NoProps>("REMINDED")
-        val REMOVED_USER = Relation<NoProps>("REMOVED_USER")
-        val REPLACED_BY = Relation<NoProps>("REPLACED_BY")
-        val REQUEST = Relation<StatusProps>("REQUEST")
-        val REQUEST_AUTHOR = Relation<NoProps>("REQUEST_AUTHOR")
-        val RESOLVED = Relation<ResolutionProps>("RESOLVED")
-        val RESULT = Relation<NoProps>("RESULT")
-        val REVISED = Relation<NoProps>("REVISED")
-        val ROLE_CHANGED = Relation<RoleProps>("ROLE_CHANGED")
-        val SCHEDULED = Relation<NoProps>("SCHEDULED")
-        val SEARCH_AUTHOR = Relation<NoProps>("SEARCH_AUTHOR")
-        val SITE_MANIFEST = Relation<ReleaseProps>("SITE_MANIFEST")
-        val SNAPSHOTTED = Relation<NoProps>("SNAPSHOTTED")
-        val SOURCE = Relation<NoProps>("SOURCE")
-        val SOURCE_TAG = Relation<NoProps>("SOURCE_TAG")
-        val STALL = Relation<NoProps>("STALL")
-        val SUBSET_OF = Relation<NoProps>("SUBSET_OF")
-        val TAGGED = Relation<PositionProps>("TAGGED")
-        val TEMPLATE = Relation<NoProps>("TEMPLATE")
-        val TEXT_TRACK = Relation<NoProps>("TEXT_TRACK")
-        val TIMED_OUT = Relation<ModerationProps>("TIMED_OUT")
-        val TIMEOUT_CLEARED = Relation<NoProps>("TIMEOUT_CLEARED")
-        val TRIGGERED = Relation<NoProps>("TRIGGERED")
-        val UNARCHIVED = Relation<ModerationProps>("UNARCHIVED")
-        val VERIFIED = Relation<NoProps>("VERIFIED")
-        val VERIFIER = Relation<NoProps>("VERIFIER")
-        val VIEWED = Relation<ViewProps>("VIEWED")
-        val VIDEO = Relation<NoProps>("VIDEO")
-        val VIEWER = Relation<NoProps>("VIEWER")
-        val VOTED = Relation<VoteProps>("VOTED")
-        val WIKILINK = Relation<NoProps>("WIKILINK")
-        val WIKILINK_AUTHOR = Relation<NoProps>("WIKILINK_AUTHOR")
-        val WINNER = Relation<ChessResultProps>("WINNER")
-        val WOT_ROOT = Relation<WotProps>("WOT_ROOT")
+        val ABOUT = Relation<NoProps>("ABOUT", NodeTarget.EVENT, NodeTarget.ADDRESS, NodeTarget.USER, *ValueType.EXTERNAL_CONTENT)
+        val ABOUT_AUTHOR = Relation<NoProps>("ABOUT_AUTHOR", NodeTarget.USER)
+        val ACCEPTED = Relation<NoProps>("ACCEPTED", NodeTarget.EVENT)
+        val ACTOR = Relation<ActorProps>("ACTOR", NodeTarget.USER)
+        val ADDED_USER = Relation<RoleProps>("ADDED_USER", NodeTarget.USER)
+        val ADMIN = Relation<RoleProps>("ADMIN", NodeTarget.USER)
+        val AGENT = Relation<FrameProps>("AGENT", NodeTarget.USER)
+        val ALLOWED = Relation<RoleProps>("ALLOWED", NodeTarget.USER)
+        val APP = Relation<NoProps>("APP", NodeTarget.ADDRESS, ValueType.APP)
+        val APPLIED = Relation<NoProps>("APPLIED", NodeTarget.EVENT)
+        val APPROVER = Relation<NoProps>("APPROVER", NodeTarget.USER)
+        val ARCHIVED = Relation<ModerationProps>("ARCHIVED", NodeTarget.USER)
+        val ASSERTION = Relation<NoProps>("ASSERTION", NodeTarget.EVENT, NodeTarget.ADDRESS)
+        val ATTESTOR = Relation<NoProps>("ATTESTOR", NodeTarget.USER)
+        val AUDITED = Relation<AuditProps>("AUDITED", NodeTarget.EVENT, ValueType.OBJECT)
+        val AUTHORED = Relation<NoProps>("AUTHORED", NodeTarget.USER)
+        val BANNED = Relation<ModerationProps>("BANNED", NodeTarget.USER)
+        val BASE_VERSION = Relation<NoProps>("BASE_VERSION", NodeTarget.EVENT)
+        val CHILD = Relation<NoProps>("CHILD", ValueType.GROUP)
+        val COLLABORATED = Relation<CollaborationProps>("COLLABORATED", NodeTarget.ADDRESS)
+        val COLLABORATED_AUTHOR = Relation<CollaborationProps>("COLLABORATED_AUTHOR", NodeTarget.USER)
+        val CONCEPT_GRAPH = Relation<NoProps>("CONCEPT_GRAPH", NodeTarget.ADDRESS)
+        val CONFIRMED = Relation<StatusProps>("CONFIRMED", NodeTarget.EVENT)
+        val COPIED = Relation<NoProps>("COPIED", NodeTarget.ADDRESS)
+        val CREATED = Relation<NoProps>("CREATED", NodeTarget.EVENT)
+        val CREDITED = Relation<CreditProps>("CREDITED", NodeTarget.EVENT, NodeTarget.ADDRESS, NodeTarget.USER)
+        val CURRENT_SCENE = Relation<NoProps>("CURRENT_SCENE", NodeTarget.ADDRESS)
+        val DEFER = Relation<NoProps>("DEFER", NodeTarget.ADDRESS)
+        val DENIED = Relation<NoProps>("DENIED", NodeTarget.USER)
+        val DESTINATION = Relation<NoProps>("DESTINATION", NodeTarget.ADDRESS)
+        val DESTINATION_AUTHOR = Relation<NoProps>("DESTINATION_AUTHOR", NodeTarget.USER)
+        val DESTROYED = Relation<NoProps>("DESTROYED", NodeTarget.EVENT)
+        val ELEMENT_OF = Relation<NoProps>("ELEMENT_OF", NodeTarget.ADDRESS)
+        val EXERCISE = Relation<NoProps>("EXERCISE", NodeTarget.ADDRESS)
+        val FILE_DATA = Relation<NoProps>("FILE_DATA", NodeTarget.EVENT)
+        val FINDER = Relation<NoProps>("FINDER", NodeTarget.USER)
+        val FOR_USER = Relation<NoProps>("FOR_USER", NodeTarget.USER)
+        val FOUND = Relation<FoundProps>("FOUND", NodeTarget.ADDRESS)
+        val FUNDED = Relation<NoProps>("FUNDED", NodeTarget.EVENT, NodeTarget.ADDRESS)
+        val GOAL = Relation<NoProps>("GOAL", NodeTarget.EVENT)
+        val GROUP = Relation<NoProps>("GROUP", ValueType.GROUP)
+        val INHERIT_FROM = Relation<NoProps>("INHERIT_FROM", NodeTarget.ADDRESS)
+        val INPUT = Relation<NoProps>("INPUT", NodeTarget.EVENT, ValueType.URL)
+        val INPUT_JOB = Relation<NoProps>("INPUT_JOB", NodeTarget.EVENT)
+        val ITEM = Relation<ItemProps>("ITEM", NodeTarget.EVENT, NodeTarget.ADDRESS, NodeTarget.USER, ValueType.HASHTAG)
+        val KEY_PACKAGE = Relation<NoProps>("KEY_PACKAGE", NodeTarget.EVENT)
+        val KICKED = Relation<NoProps>("KICKED", NodeTarget.USER)
+        val LINKED = Relation<NoProps>("LINKED", NodeTarget.EVENT, NodeTarget.ADDRESS, NodeTarget.USER)
+        val MAINTAINER = Relation<NoProps>("MAINTAINER", NodeTarget.USER)
+        val NOTIFICATION_SERVER = Relation<NoProps>("NOTIFICATION_SERVER", NodeTarget.USER)
+        val OBSERVER = Relation<NoProps>("OBSERVER", NodeTarget.USER)
+        val OPEN_TIMESTAMP = Relation<NoProps>("OPEN_TIMESTAMP", NodeTarget.EVENT)
+        val OPPONENT = Relation<ChessResultProps>("OPPONENT", NodeTarget.USER)
+        val OPTION = Relation<NoProps>("OPTION", NodeTarget.ADDRESS)
+        val ORIGIN = Relation<NoProps>("ORIGIN", NodeTarget.ADDRESS)
+        val OWNER = Relation<OwnerProps>("OWNER", NodeTarget.USER)
+        val PARENT_LIST = Relation<NoProps>("PARENT_LIST", NodeTarget.EVENT, NodeTarget.ADDRESS, ValueType.LIST)
+        val PODCAST_AUTHOR = Relation<RoleProps>("PODCAST_AUTHOR", NodeTarget.USER)
+        val PUBLICATION = Relation<NoProps>("PUBLICATION", NodeTarget.ADDRESS)
+        val REDEEMED = Relation<NoProps>("REDEEMED", NodeTarget.EVENT)
+        val REDEEMED_AUTHOR = Relation<NoProps>("REDEEMED_AUTHOR", NodeTarget.USER)
+        val RELEASE = Relation<NoProps>("RELEASE", NodeTarget.ADDRESS)
+        val REMINDED = Relation<NoProps>("REMINDED", NodeTarget.EVENT)
+        val REMOVED_USER = Relation<NoProps>("REMOVED_USER", NodeTarget.USER)
+        val REPLACED_BY = Relation<NoProps>("REPLACED_BY", NodeTarget.USER)
+        val REQUEST = Relation<StatusProps>("REQUEST", NodeTarget.EVENT, NodeTarget.ADDRESS)
+        val REQUEST_AUTHOR = Relation<NoProps>("REQUEST_AUTHOR", NodeTarget.USER)
+        val RESOLVED = Relation<ResolutionProps>("RESOLVED", NodeTarget.EVENT)
+        val RESULT = Relation<NoProps>("RESULT", NodeTarget.EVENT)
+        val REVISED = Relation<NoProps>("REVISED", NodeTarget.EVENT)
+        val ROLE_CHANGED = Relation<RoleProps>("ROLE_CHANGED", NodeTarget.USER)
+        val SITE_MANIFEST = Relation<ReleaseProps>("SITE_MANIFEST", NodeTarget.ADDRESS)
+        val SNAPSHOTTED = Relation<NoProps>("SNAPSHOTTED", NodeTarget.ADDRESS)
+        val SOURCE = Relation<NoProps>("SOURCE", NodeTarget.EVENT, NodeTarget.ADDRESS)
+        val SOURCE_TAG = Relation<NoProps>("SOURCE_TAG", NodeTarget.EVENT)
+        val SUBSET_OF = Relation<NoProps>("SUBSET_OF", NodeTarget.ADDRESS)
+        val TAGGED = Relation<PositionProps>("TAGGED", NodeTarget.USER)
+        val TEMPLATE = Relation<NoProps>("TEMPLATE", NodeTarget.ADDRESS)
+        val TEXT_TRACK = Relation<NoProps>("TEXT_TRACK", NodeTarget.EVENT, NodeTarget.ADDRESS)
+        val TIMED_OUT = Relation<ModerationProps>("TIMED_OUT", NodeTarget.USER)
+        val TIMEOUT_CLEARED = Relation<NoProps>("TIMEOUT_CLEARED", NodeTarget.USER)
+        val TRIGGERED = Relation<NoProps>("TRIGGERED", NodeTarget.ADDRESS)
+        val UNARCHIVED = Relation<ModerationProps>("UNARCHIVED", NodeTarget.USER)
+        val VERIFIED = Relation<NoProps>("VERIFIED", NodeTarget.ADDRESS)
+        val VERIFIER = Relation<NoProps>("VERIFIER", NodeTarget.USER)
+        val VIEWED = Relation<ViewProps>("VIEWED", NodeTarget.EVENT, NodeTarget.ADDRESS)
+        val VIDEO = Relation<NoProps>("VIDEO", NodeTarget.ADDRESS)
+        val VIEWER = Relation<NoProps>("VIEWER", NodeTarget.USER)
+        val VOTED = Relation<VoteProps>("VOTED", NodeTarget.EVENT)
+        val WIKILINK = Relation<NoProps>("WIKILINK", NodeTarget.EVENT, ValueType.WIKI)
+        val WIKILINK_AUTHOR = Relation<NoProps>("WIKILINK_AUTHOR", NodeTarget.USER)
+        val WINNER = Relation<ChessResultProps>("WINNER", NodeTarget.USER)
+        val WOT_ROOT = Relation<WotProps>("WOT_ROOT", NodeTarget.USER)
 
         /** Every relation the projection writes: the schema's relationship types. */
         val ALL: List<Relation<*>> =
@@ -309,7 +346,6 @@ class Relation<P : LinkProps>(
                 ZAPPED,
                 ZAP_RECIPIENT,
                 ZAP_SENDER,
-                ZAP_REQUEST,
                 HIGHLIGHTED,
                 HIGHLIGHTED_AUTHOR,
                 CITED,
@@ -357,7 +393,34 @@ class Relation<P : LinkProps>(
                 TIMESTAMPED,
                 REDIRECT,
                 HASHTAG,
-                TAG,
+                LOCATION,
+                REFERENCE,
+                LANGUAGE,
+                LABEL,
+                LABEL_NAMESPACE,
+                IDENTITY,
+                SPECIES,
+                SCHEMA,
+                SCHEMA_NAMESPACE,
+                TRANSACTION,
+                TORRENT,
+                KEY_PACKAGE_REF,
+                ROOT_KIND,
+                PARENT_KIND,
+                REACTED_KIND,
+                REPOSTED_KIND,
+                DELETED_KIND,
+                ZAPPED_KIND,
+                TIMESTAMPED_KIND,
+                APPROVED_KIND,
+                SUBJECT_KIND,
+                RATED_KIND,
+                RECOMMENDED_KIND,
+                ABOUT_KIND,
+                SUPPORTED_KIND,
+                ALLOWED_KIND,
+                DEFINED_KIND,
+                DRAFT_KIND,
                 CLIENT,
                 ZAP_SPLIT,
                 EMOJI_SET,
@@ -410,7 +473,6 @@ class Relation<P : LinkProps>(
                 KICKED,
                 LINKED,
                 MAINTAINER,
-                MERCHANT,
                 NOTIFICATION_SERVER,
                 OBSERVER,
                 OPEN_TIMESTAMP,
@@ -418,9 +480,7 @@ class Relation<P : LinkProps>(
                 OPTION,
                 ORIGIN,
                 OWNER,
-                PALETTE,
                 PARENT_LIST,
-                PERSONA,
                 PODCAST_AUTHOR,
                 PUBLICATION,
                 REDEEMED,
@@ -435,13 +495,10 @@ class Relation<P : LinkProps>(
                 RESULT,
                 REVISED,
                 ROLE_CHANGED,
-                SCHEDULED,
-                SEARCH_AUTHOR,
                 SITE_MANIFEST,
                 SNAPSHOTTED,
                 SOURCE,
                 SOURCE_TAG,
-                STALL,
                 SUBSET_OF,
                 TAGGED,
                 TEMPLATE,

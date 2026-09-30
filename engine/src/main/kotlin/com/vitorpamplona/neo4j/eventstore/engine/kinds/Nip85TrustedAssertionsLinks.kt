@@ -21,6 +21,7 @@
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.quartz.nip01Core.tags.dTag.DTag
 import com.vitorpamplona.quartz.nip22Comments.tags.ReplyIdentifierTag
@@ -43,8 +44,8 @@ internal fun KindMappers.Builder.nip85TrustedAssertions() {
     // NIP-85: the `d` is the SUBJECT, the NIP-73 identifier this assertion scores (the same node a
     // NIP-73 `i` names), with the scores as props; the `k` tags are its NIP-73 kinds.
     on<ExternalIdAssertionEvent> { e ->
-        tag(Relation.SUBJECT, ReplyIdentifierTag.TAG_NAME, e.aboutExternalId(), DTag.TAG_NAME, e.tags.nip85ContentSubjectProps())
-        each(e.tags, Nip85ExternalIdKindTag::parse) { tag(Relation.TAG, Nip85ExternalIdKindTag.TAG_NAME, it) }
+        external(Relation.SUBJECT, e.aboutExternalId(), DTag.TAG_NAME, e.tags.nip85ContentSubjectProps())
+        each(e.tags, Nip85ExternalIdKindTag::parse) { value(Relation.SUBJECT_KIND, ValueType.KIND, it, Nip85ExternalIdKindTag.TAG_NAME) }
     }
 
     // NIP-85: each `<kind>:<tag>` entry names the pubkey the user trusts to sign that assertion,

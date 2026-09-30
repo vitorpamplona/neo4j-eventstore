@@ -22,6 +22,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkBuilder
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.LinkProps
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.MuteProps
@@ -128,7 +129,7 @@ internal fun KindMappers.Builder.nip51Lists() {
     }
 
     // The followed locations: every public `g` geohash is `SUBSCRIBED`.
-    on<GeohashListEvent> { e -> each(e.tags, GeoHashTag::parse) { tag(Relation.SUBSCRIBED, GeoHashTag.TAG_NAME, it) } }
+    on<GeohashListEvent> { e -> each(e.tags, GeoHashTag::parse) { value(Relation.SUBSCRIBED, ValueType.GEOHASH, it, GeoHashTag.TAG_NAME) } }
 
     // NIP-51: a follow list of code authors, so its `p`s are `SUBSCRIBED` (`FOLLOW` is kind 3 only).
     on<GitAuthorListEvent> { e -> each(e.tags, GitAuthorTag::parseKey) { user(Relation.SUBSCRIBED, it, GitAuthorTag.TAG_NAME) } }
@@ -147,12 +148,14 @@ internal fun KindMappers.Builder.nip51Lists() {
     // sets (kind 30015 `a` tags; other `a` kinds are skipped, as `publicInterestSets` does) are
     // `SUBSCRIBED`.
     on<InterestListEvent> { e ->
-        each(e.tags, TopicTag::parse) { tag(Relation.SUBSCRIBED, TopicTag.TAG_NAME, it.lowercase()) }
+        each(e.tags, TopicTag::parse) { value(Relation.SUBSCRIBED, ValueType.HASHTAG, it.lowercase(), TopicTag.TAG_NAME) }
         e.publicInterestSets().forEach { address(Relation.SUBSCRIBED, it.address, AddressBookmark.TAG_NAME) }
     }
 
     // NIP-51: the hashtags that make up the interest (`t`, the same lowercased node `HASHTAG` uses) are its `MEMBER`s.
-    on<InterestSetEvent> { e -> each(e.tags, TopicTag::parse) { tag(Relation.MEMBER, TopicTag.TAG_NAME, it.lowercase()) } }
+    on<InterestSetEvent> { e ->
+        each(e.tags, TopicTag::parse) { value(Relation.MEMBER, ValueType.HASHTAG, it.lowercase(), TopicTag.TAG_NAME) }
+    }
 
     // NIP-51: the `p`s muted for one kind, which the `d` names; it rides as `muted_kind`, since a
     // mute of one kind is not a full mute.
@@ -188,7 +191,7 @@ internal fun KindMappers.Builder.nip51Lists() {
     // `CURATED`; the `a` is the software application (`APP`) they release and the NIP-82 `i` its
     // app id.
     on<ReleaseArtifactSetEvent> { e ->
-        each(e.tags, AppIdTag::parse) { tag(Relation.TAG, AppIdTag.TAG_NAME, it) }
+        each(e.tags, AppIdTag::parse) { value(Relation.APP, ValueType.APP, it, AppIdTag.TAG_NAME) }
         each(e.tags, EventBookmark::parseId) { event(Relation.CURATED, it, EventBookmark.TAG_NAME) }
         each(e.tags, AddressBookmark::parseAddress) { address(Relation.APP, it, AddressBookmark.TAG_NAME) }
     }
@@ -197,7 +200,7 @@ internal fun KindMappers.Builder.nip51Lists() {
     // its messages carry, so that is the target; the host relay is not part of it.
     on<SimpleGroupListEvent> { e ->
         // The group is its NIP-29 `h` id: one node whichever relay hosts it.
-        each(e.tags, GroupTag::parse) { tag(Relation.SUBSCRIBED, GroupIdTag.TAG_NAME, it.groupId, GroupTag.TAG_NAME) }
+        each(e.tags, GroupTag::parse) { value(Relation.SUBSCRIBED, ValueType.GROUP, it.groupId, GroupTag.TAG_NAME) }
     }
 
     // NIP-51: the people in the pack are its `MEMBER`s; `t` are its topics.
@@ -230,7 +233,7 @@ private fun LinkBuilder.nip51Mutes(tags: TagArray) =
         when (it) {
             is UserTag -> user(Relation.MUTE, it.pubKey, UserTag.TAG_NAME)
             is EventTag -> event(Relation.MUTE, it.eventId, EventTag.TAG_NAME)
-            is MutedHashtagTag -> tag(Relation.MUTE, MutedHashtagTag.TAG_NAME, it.hashtag.lowercase())
-            is WordTag -> tag(Relation.MUTE, WordTag.TAG_NAME, it.word.lowercase())
+            is MutedHashtagTag -> value(Relation.MUTE, ValueType.HASHTAG, it.hashtag.lowercase(), MutedHashtagTag.TAG_NAME)
+            is WordTag -> value(Relation.MUTE, ValueType.WORD, it.word.lowercase(), WordTag.TAG_NAME)
         }
     }

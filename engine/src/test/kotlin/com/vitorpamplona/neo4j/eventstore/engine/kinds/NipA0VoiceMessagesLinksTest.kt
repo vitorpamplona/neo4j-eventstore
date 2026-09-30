@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.quartz.nipA0VoiceMessages.VoiceReplyEvent
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -58,10 +59,10 @@ class NipA0VoiceMessagesLinksTest {
         assertEquals(
             listOf(
                 Link(Relation.ROOT, LinkTarget.Event(root), "E"),
-                Link(Relation.TAG, LinkTarget.Tag("K", "1222"), "K"),
+                Link(Relation.ROOT_KIND, LinkTarget.Tag(ValueType.KIND, "1222"), "K"),
                 Link(Relation.ROOT_AUTHOR, LinkTarget.User(rootAuthor), "P"),
                 Link(Relation.PARENT, LinkTarget.Event(parent), "e"),
-                Link(Relation.TAG, LinkTarget.Tag("k", "1244"), "k"),
+                Link(Relation.PARENT_KIND, LinkTarget.Tag(ValueType.KIND, "1244"), "k"),
                 Link(Relation.PARENT_AUTHOR, LinkTarget.User(parentAuthor), "p"),
             ),
             event.links(),
@@ -84,7 +85,7 @@ class NipA0VoiceMessagesLinksTest {
                 Link(Relation.ROOT, LinkTarget.Event(parent), "e"),
                 Link(Relation.ROOT_AUTHOR, LinkTarget.User(parentAuthor), "p"),
                 Link(Relation.PARENT, LinkTarget.Event(parent), "e"),
-                Link(Relation.TAG, LinkTarget.Tag("k", "1222"), "k"),
+                Link(Relation.PARENT_KIND, LinkTarget.Tag(ValueType.KIND, "1222"), "k"),
                 Link(Relation.PARENT_AUTHOR, LinkTarget.User(parentAuthor), "p"),
             ),
             event.links(),

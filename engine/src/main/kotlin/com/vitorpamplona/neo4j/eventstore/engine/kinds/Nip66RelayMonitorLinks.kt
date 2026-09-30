@@ -21,6 +21,7 @@
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.quartz.nip01Core.tags.geohash.GeoHashTag
 import com.vitorpamplona.quartz.nip66RelayMonitor.discovery.RelayDiscoveryEvent
@@ -35,8 +36,10 @@ internal fun KindMappers.Builder.nip66RelayMonitor() {
      */
     on<RelayDiscoveryEvent> { e ->
         hashtags(e.tags)
-        each(e.tags, GeoHashTag::parse) { tag(Relation.TAG, GeoHashTag.TAG_NAME, it) }
-        each(e.tags, AcceptedKindTag::parse) { if (!it.negated) tag(Relation.TAG, AcceptedKindTag.TAG_NAME, it.kind.toString()) }
+        each(e.tags, GeoHashTag::parse) { value(Relation.LOCATION, ValueType.GEOHASH, it, GeoHashTag.TAG_NAME) }
+        each(e.tags, AcceptedKindTag::parse) {
+            if (!it.negated) value(Relation.SUPPORTED_KIND, ValueType.KIND, it.kind.toString(), AcceptedKindTag.TAG_NAME)
+        }
     }
-    on<RelayMonitorEvent> { e -> each(e.tags, GeoHashTag::parse) { tag(Relation.TAG, GeoHashTag.TAG_NAME, it) } }
+    on<RelayMonitorEvent> { e -> each(e.tags, GeoHashTag::parse) { value(Relation.LOCATION, ValueType.GEOHASH, it, GeoHashTag.TAG_NAME) } }
 }

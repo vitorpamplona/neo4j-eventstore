@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.links
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.ZapSplitProps
 import com.vitorpamplona.quartz.nip01Core.core.Event
@@ -34,6 +35,8 @@ import com.vitorpamplona.quartz.nip19Bech32.toNsec
 import com.vitorpamplona.quartz.utils.Hex
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 class KindLinksTest {
     private val pk = "1".repeat(64)
@@ -43,22 +46,22 @@ class KindLinksTest {
     fun malformedTargetsAreDroppedAndHexIsLowercased() {
         val built =
             links {
-                event(Relation.PARENT, "not-an-id")
-                event(Relation.PARENT, "g".repeat(64))
-                user(Relation.MENTION, "A".repeat(64))
-                address(Relation.QUOTE, "30023:short:d")
-                address(Relation.QUOTE, "30023:${"B".repeat(64)}:post")
-                address(Relation.QUOTE, "10006:$pk:")
-                tag(Relation.HASHTAG, "t", " ")
-                event(Relation.PARENT, id)
-                event(Relation.PARENT, id)
+                event(Relation.PARENT, "not-an-id", "e")
+                event(Relation.PARENT, "g".repeat(64), "e")
+                user(Relation.MENTION, "A".repeat(64), "p")
+                address(Relation.QUOTE, "30023:short:d", "q")
+                address(Relation.QUOTE, "30023:${"B".repeat(64)}:post", "q")
+                address(Relation.QUOTE, "10006:$pk:", "q")
+                value(Relation.HASHTAG, ValueType.HASHTAG, " ", "t")
+                event(Relation.PARENT, id, "e")
+                event(Relation.PARENT, id, "e")
             }
         assertEquals(
             listOf(
-                Link(Relation.MENTION, LinkTarget.User("a".repeat(64))),
-                Link(Relation.QUOTE, LinkTarget.Address("30023:${"b".repeat(64)}:post")),
-                Link(Relation.QUOTE, LinkTarget.Address("10006:$pk:")),
-                Link(Relation.PARENT, LinkTarget.Event(id)),
+                Link(Relation.MENTION, LinkTarget.User("a".repeat(64)), "p"),
+                Link(Relation.QUOTE, LinkTarget.Address("30023:${"b".repeat(64)}:post"), "q"),
+                Link(Relation.QUOTE, LinkTarget.Address("10006:$pk:"), "q"),
+                Link(Relation.PARENT, LinkTarget.Event(id), "e"),
             ),
             built,
         )
@@ -108,6 +111,38 @@ class KindLinksTest {
             ),
             KindLinks.of(event),
         )
+    }
+
+    @Test
+    fun anExternalIdIsKeyedByWhatItNames() {
+        val built =
+            links {
+                external(Relation.ROOT, "https://example.com/post", "I")
+                external(Relation.ROOT, "#Nostr", "I")
+                external(Relation.ROOT, "geo:U4PRUY", "I")
+                external(Relation.ROOT, "isbn:9780765382030", "I")
+                external(Relation.ROOT, "#", "I")
+            }
+        assertEquals(
+            listOf(
+                Link(Relation.ROOT, LinkTarget.Tag(ValueType.URL, "https://example.com/post"), "I"),
+                Link(Relation.ROOT, LinkTarget.Tag(ValueType.HASHTAG, "nostr"), "I"),
+                Link(Relation.ROOT, LinkTarget.Tag(ValueType.GEOHASH, "u4pruy"), "I"),
+                Link(Relation.ROOT, LinkTarget.Tag(ValueType.EXTERNAL, "isbn:9780765382030"), "I"),
+            ),
+            built,
+        )
+    }
+
+    @Test
+    fun aRelationTakesOnlyTheTargetsItDeclares() {
+        assertFailsWith<IllegalArgumentException> { links { user(Relation.HASHTAG, pk, "p") } }
+        assertFailsWith<IllegalArgumentException> { links { value(Relation.FOLLOW, ValueType.HASHTAG, "nostr", "t") } }
+    }
+
+    @Test
+    fun everyRelationDeclaresItsTargets() {
+        Relation.ALL.forEach { assertTrue(it.targets.isNotEmpty(), "${it.name} declares no targets") }
     }
 
     @Test

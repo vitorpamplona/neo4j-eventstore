@@ -20,6 +20,7 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.quartz.nip01Core.core.has
 import com.vitorpamplona.quartz.nip01Core.tags.aTag.ATag
 import com.vitorpamplona.quartz.nip01Core.tags.events.ETag
@@ -46,9 +47,10 @@ internal sealed interface Nip32LabelTarget {
         val tag: ATag,
     ) : Nip32LabelTarget
 
-    /** A `t` (lowercased, as every hashtag is) or an `r`, by [name]. */
+    /** A `t` (lowercased, as every hashtag is) or an `r`: [name] is the tag, [type] what its value is. */
     data class OfTag(
         val name: String,
+        val type: ValueType,
         val value: String,
     ) : Nip32LabelTarget
 }
@@ -61,12 +63,32 @@ internal object Nip32LabelTargetTag {
     fun parse(tag: Array<String>): Nip32LabelTarget? {
         ensure(tag.has(1)) { return null }
         return when (tag[0]) {
-            ETag.TAG_NAME -> ETag.parse(tag)?.let { Nip32LabelTarget.OfEvent(it) }
-            PTag.TAG_NAME -> PTag.parse(tag)?.let { Nip32LabelTarget.OfUser(it) }
-            ATag.TAG_NAME -> ATag.parse(tag)?.let { Nip32LabelTarget.OfAddress(it) }
-            HashtagTag.TAG_NAME -> HashtagTag.parseLowercase(tag)?.let { Nip32LabelTarget.OfTag(HashtagTag.TAG_NAME, it) }
-            ReferenceTag.TAG_NAME -> ReferenceTag.parse(tag)?.let { Nip32LabelTarget.OfTag(ReferenceTag.TAG_NAME, it) }
-            else -> null
+            ETag.TAG_NAME -> {
+                ETag.parse(tag)?.let { Nip32LabelTarget.OfEvent(it) }
+            }
+
+            PTag.TAG_NAME -> {
+                PTag.parse(tag)?.let { Nip32LabelTarget.OfUser(it) }
+            }
+
+            ATag.TAG_NAME -> {
+                ATag.parse(tag)?.let { Nip32LabelTarget.OfAddress(it) }
+            }
+
+            HashtagTag.TAG_NAME -> {
+                HashtagTag
+                    .parseLowercase(
+                        tag,
+                    )?.let { Nip32LabelTarget.OfTag(HashtagTag.TAG_NAME, ValueType.HASHTAG, it) }
+            }
+
+            ReferenceTag.TAG_NAME -> {
+                ReferenceTag.parse(tag)?.let { Nip32LabelTarget.OfTag(ReferenceTag.TAG_NAME, ValueType.URL, it) }
+            }
+
+            else -> {
+                null
+            }
         }
     }
 }

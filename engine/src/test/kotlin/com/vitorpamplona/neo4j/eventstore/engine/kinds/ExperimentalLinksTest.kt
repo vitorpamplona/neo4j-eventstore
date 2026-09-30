@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.CollaborationProps
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.ParticipantProps
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.StatusProps
@@ -68,7 +69,7 @@ class ExperimentalLinksTest {
     fun fundraiserLinksItsHashtagsOnly() {
         val tags = tags(arrayOf("d", "roof"), arrayOf("t", "Bitcoin"), arrayOf("w", "bc1qexample"), arrayOf("goal", "100000"))
         assertEquals(
-            listOf(Link(Relation.HASHTAG, LinkTarget.Tag("t", "bitcoin"), "t")),
+            listOf(Link(Relation.HASHTAG, LinkTarget.Tag(ValueType.HASHTAG, "bitcoin"), "t")),
             FundraiserEvent(me, me, 0, tags, "", me).links(),
         )
     }
@@ -114,8 +115,8 @@ class ExperimentalLinksTest {
     fun attestorProficiencyLinksItsKinds() {
         assertEquals(
             listOf(
-                Link(Relation.TAG, LinkTarget.Tag("k", "1"), "k"),
-                Link(Relation.TAG, LinkTarget.Tag("k", "30023"), "k"),
+                Link(Relation.SUPPORTED_KIND, LinkTarget.Tag(ValueType.KIND, "1"), "k"),
+                Link(Relation.SUPPORTED_KIND, LinkTarget.Tag(ValueType.KIND, "30023"), "k"),
             ),
             AttestorProficiencyEvent(me, me, 0, tags(arrayOf("k", "1"), arrayOf("k", "30023")), "", me).links(),
         )
@@ -126,7 +127,7 @@ class ExperimentalLinksTest {
         assertEquals(
             listOf(
                 Link(Relation.RECOMMENDED, LinkTarget.User(alice), "d"),
-                Link(Relation.TAG, LinkTarget.Tag("k", "1"), "k"),
+                Link(Relation.RECOMMENDED_KIND, LinkTarget.Tag(ValueType.KIND, "1"), "k"),
             ),
             AttestorRecommendationEvent(me, me, 0, tags(arrayOf("d", alice), arrayOf("k", "1")), "", me).links(),
         )
@@ -155,8 +156,8 @@ class ExperimentalLinksTest {
         val oriole = "https://www.wikidata.org/entity/Q805774"
         assertEquals(
             listOf(
-                Link(Relation.TAG, LinkTarget.Tag("i", gallinule), "i"),
-                Link(Relation.TAG, LinkTarget.Tag("g", "dhwm"), "g"),
+                Link(Relation.SPECIES, LinkTarget.Tag(ValueType.URL, gallinule), "i"),
+                Link(Relation.LOCATION, LinkTarget.Tag(ValueType.GEOHASH, "dhwm"), "g"),
             ),
             BirdDetectionEvent(
                 me,
@@ -169,8 +170,8 @@ class ExperimentalLinksTest {
         )
         assertEquals(
             listOf(
-                Link(Relation.TAG, LinkTarget.Tag("i", gallinule), "i"),
-                Link(Relation.TAG, LinkTarget.Tag("i", oriole), "i"),
+                Link(Relation.SPECIES, LinkTarget.Tag(ValueType.URL, gallinule), "i"),
+                Link(Relation.SPECIES, LinkTarget.Tag(ValueType.URL, oriole), "i"),
             ),
             BirdexEvent(
                 me,
@@ -187,13 +188,13 @@ class ExperimentalLinksTest {
     fun geohashChannelsLinkTheirCell() {
         assertEquals(
             listOf(
-                Link(Relation.TAG, LinkTarget.Tag("g", "u4pruy"), "g"),
-                Link(Relation.HASHTAG, LinkTarget.Tag("t", "teleport"), "t"),
+                Link(Relation.LOCATION, LinkTarget.Tag(ValueType.GEOHASH, "u4pruy"), "g"),
+                Link(Relation.HASHTAG, LinkTarget.Tag(ValueType.HASHTAG, "teleport"), "t"),
             ),
             GeohashChatEvent(me, me, 0, tags(arrayOf("g", "u4pruy"), arrayOf("n", "nick"), arrayOf("t", "teleport")), "hi", me).links(),
         )
         assertEquals(
-            listOf(Link(Relation.TAG, LinkTarget.Tag("g", "u4pr"), "g")),
+            listOf(Link(Relation.LOCATION, LinkTarget.Tag(ValueType.GEOHASH, "u4pr"), "g")),
             GeohashPresenceEvent(me, me, 0, tags(arrayOf("g", "u4pr")), "", me).links(),
         )
     }
@@ -203,7 +204,7 @@ class ExperimentalLinksTest {
         assertEquals(
             listOf(
                 Link(Relation.OPEN_TIMESTAMP, LinkTarget.Event(note1), "open_timestamp"),
-                Link(Relation.TAG, LinkTarget.Tag("g", "u4pr"), "g"),
+                Link(Relation.LOCATION, LinkTarget.Tag(ValueType.GEOHASH, "u4pr"), "g"),
             ),
             ExternalCitationEvent(
                 me,
@@ -215,7 +216,7 @@ class ExperimentalLinksTest {
             ).links(),
         )
         assertEquals(
-            listOf(Link(Relation.TAG, LinkTarget.Tag("g", "u4pr"), "g")),
+            listOf(Link(Relation.LOCATION, LinkTarget.Tag(ValueType.GEOHASH, "u4pr"), "g")),
             HardcopyCitationEvent(
                 me,
                 me,
@@ -266,7 +267,7 @@ class ExperimentalLinksTest {
             listOf(
                 Link(Relation.EXERCISE, LinkTarget.Address(squat), "exercise"),
                 Link(Relation.TEMPLATE, LinkTarget.Address(template), "template"),
-                Link(Relation.HASHTAG, LinkTarget.Tag("t", "fitness"), "t"),
+                Link(Relation.HASHTAG, LinkTarget.Tag(ValueType.HASHTAG, "fitness"), "t"),
             ),
             WorkoutRecordEvent(me, me, 0, tags, "", me).links(),
         )
@@ -302,7 +303,7 @@ class ExperimentalLinksTest {
         assertEquals(
             listOf(
                 Link(Relation.RELEASE, LinkTarget.Address(release), "a"),
-                Link(Relation.HASHTAG, LinkTarget.Tag("t", "nostr"), "t"),
+                Link(Relation.HASHTAG, LinkTarget.Tag(ValueType.HASHTAG, "nostr"), "t"),
             ),
             SoftwareApplicationEvent(
                 me,
@@ -314,7 +315,7 @@ class ExperimentalLinksTest {
             ).links(),
         )
         assertEquals(
-            listOf(Link(Relation.TAG, LinkTarget.Tag("i", "com.example"), "i")),
+            listOf(Link(Relation.APP, LinkTarget.Tag(ValueType.APP, "com.example"), "i")),
             SoftwareAssetEvent(me, me, 0, tags(arrayOf("i", "com.example"), arrayOf("x", "abc")), "", me).links(),
         )
     }
@@ -333,7 +334,7 @@ class ExperimentalLinksTest {
             listOf(
                 Link(Relation.ABOUT, LinkTarget.Event(note1), "e"),
                 Link(Relation.ABOUT_AUTHOR, LinkTarget.User(alice), "p"),
-                Link(Relation.TAG, LinkTarget.Tag("k", "7"), "k"),
+                Link(Relation.ABOUT_KIND, LinkTarget.Tag(ValueType.KIND, "7"), "k"),
             ),
             WakeUpEvent(me, me, 0, tags(arrayOf("e", note1), arrayOf("p", alice), arrayOf("k", "7")), "", me).links(),
         )
@@ -352,7 +353,7 @@ class ExperimentalLinksTest {
         assertEquals(
             listOf(
                 Link(Relation.CONFIRMED, LinkTarget.Event(note1), "e", StatusProps("no_longer_there")),
-                Link(Relation.TAG, LinkTarget.Tag("g", "u4pr"), "g"),
+                Link(Relation.LOCATION, LinkTarget.Tag(ValueType.GEOHASH, "u4pr"), "g"),
             ),
             RoadEventConfirmationEvent(
                 me,
@@ -365,9 +366,9 @@ class ExperimentalLinksTest {
         )
         assertEquals(
             listOf(
-                Link(Relation.HASHTAG, LinkTarget.Tag("t", "police"), "t"),
-                Link(Relation.TAG, LinkTarget.Tag("g", "u4pr"), "g"),
-                Link(Relation.TAG, LinkTarget.Tag("g", "u4pru"), "g"),
+                Link(Relation.HASHTAG, LinkTarget.Tag(ValueType.HASHTAG, "police"), "t"),
+                Link(Relation.LOCATION, LinkTarget.Tag(ValueType.GEOHASH, "u4pr"), "g"),
+                Link(Relation.LOCATION, LinkTarget.Tag(ValueType.GEOHASH, "u4pru"), "g"),
             ),
             RoadEventReportEvent(
                 me,

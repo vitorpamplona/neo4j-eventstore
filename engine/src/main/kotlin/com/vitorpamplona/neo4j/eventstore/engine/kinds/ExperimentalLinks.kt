@@ -21,6 +21,7 @@
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.CollaborationProps
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.StatusProps
@@ -86,14 +87,16 @@ internal fun KindMappers.Builder.experimental() {
     }
 
     // The kinds this attestor declares it can attest.
-    on<AttestorProficiencyEvent> { e -> each(e.tags, KindTag::parse) { tag(Relation.TAG, KindTag.TAG_NAME, it.toString()) } }
+    on<AttestorProficiencyEvent> { e ->
+        each(e.tags, KindTag::parse) { value(Relation.SUPPORTED_KIND, ValueType.KIND, it.toString(), KindTag.TAG_NAME) }
+    }
 
     // The recommended attestor is this event's `d` ([build] writes the pubkey there). Like a
     // NIP-85 assertion's subject, it is the thing the event is about, not the event's own
     // identity, so it is a link; the validator drops a `d` that is not a pubkey.
     on<AttestorRecommendationEvent> { e ->
         user(Relation.RECOMMENDED, e.dTag(), DTag.TAG_NAME)
-        each(e.tags, KindTag::parse) { tag(Relation.TAG, KindTag.TAG_NAME, it.toString()) }
+        each(e.tags, KindTag::parse) { value(Relation.RECOMMENDED_KIND, ValueType.KIND, it.toString(), KindTag.TAG_NAME) }
     }
 
     // The assertion to attest (an `e` or an `a`) and the attestors asked to (`p`, see `attestorPubKeys`).
@@ -114,27 +117,31 @@ internal fun KindMappers.Builder.experimental() {
 
     // The species (`i`, a Wikidata URL) and where it was seen (`g`).
     on<BirdDetectionEvent> { e ->
-        each(e.tags, ExperimentalSpeciesIdTag::parse) { tag(Relation.TAG, ExperimentalSpeciesIdTag.TAG_NAME, it) }
-        each(e.tags, GeoHashTag::parse) { tag(Relation.TAG, GeoHashTag.TAG_NAME, it) }
+        each(e.tags, ExperimentalSpeciesIdTag::parse) { external(Relation.SPECIES, it, ExperimentalSpeciesIdTag.TAG_NAME) }
+        each(e.tags, GeoHashTag::parse) { value(Relation.LOCATION, ValueType.GEOHASH, it, GeoHashTag.TAG_NAME) }
     }
 
     // Every species on the life list, by its `i` (a Wikidata URL).
-    on<BirdexEvent> { e -> each(e.tags, ExperimentalSpeciesIdTag::parse) { tag(Relation.TAG, ExperimentalSpeciesIdTag.TAG_NAME, it) } }
+    on<BirdexEvent> { e ->
+        each(e.tags, ExperimentalSpeciesIdTag::parse) { external(Relation.SPECIES, it, ExperimentalSpeciesIdTag.TAG_NAME) }
+    }
 
     // The channel cell (`g`) and the `t` tags (Bitchat writes `teleport` there).
     on<GeohashChatEvent> { e ->
-        each(e.tags, GeoHashTag::parse) { tag(Relation.TAG, GeoHashTag.TAG_NAME, it) }
+        each(e.tags, GeoHashTag::parse) { value(Relation.LOCATION, ValueType.GEOHASH, it, GeoHashTag.TAG_NAME) }
         hashtags(e.tags)
     }
-    on<GeohashPresenceEvent> { e -> each(e.tags, GeoHashTag::parse) { tag(Relation.TAG, GeoHashTag.TAG_NAME, it) } }
+    on<GeohashPresenceEvent> { e ->
+        each(e.tags, GeoHashTag::parse) { value(Relation.LOCATION, ValueType.GEOHASH, it, GeoHashTag.TAG_NAME) }
+    }
 
     // The location the source was consulted from (`g`). The cited source itself is a value (a title, a DOI, a url).
-    on<CitationEvent> { e -> tag(Relation.TAG, GeoHashTag.TAG_NAME, e.geohash()) }
+    on<CitationEvent> { e -> value(Relation.LOCATION, ValueType.GEOHASH, e.geohash(), GeoHashTag.TAG_NAME) }
 
     // The NIP-03 timestamp attesting when the page was seen, then the base's `g`.
     on<ExternalCitationEvent> { e ->
         event(Relation.OPEN_TIMESTAMP, e.openTimestamp(), CitationTags.OPEN_TIMESTAMP)
-        tag(Relation.TAG, GeoHashTag.TAG_NAME, e.geohash())
+        value(Relation.LOCATION, ValueType.GEOHASH, e.geohash(), GeoHashTag.TAG_NAME)
     }
 
     // The counterparty the message is addressed to (`p`) and, on a response, the request it answers (`e`).
@@ -191,7 +198,7 @@ internal fun KindMappers.Builder.experimental() {
     }
 
     // The application this asset belongs to, by its `i`: the 32267's `d` identifier, not a NIP-73 id.
-    on<SoftwareAssetEvent> { e -> tag(Relation.TAG, AppIdTag.TAG_NAME, e.appId()) }
+    on<SoftwareAssetEvent> { e -> value(Relation.APP, ValueType.APP, e.appId(), AppIdTag.TAG_NAME) }
 
     free<FileStorageEvent>()
 
@@ -205,7 +212,7 @@ internal fun KindMappers.Builder.experimental() {
     on<WakeUpEvent> { e ->
         each(e.tags, ETag::parse) { event(Relation.ABOUT, it, ETag.TAG_NAME) }
         each(e.tags, PTag::parse) { user(Relation.ABOUT_AUTHOR, it, PTag.TAG_NAME) }
-        each(e.tags, NipKindTag::parse) { tag(Relation.TAG, NipKindTag.TAG_NAME, it.toString()) }
+        each(e.tags, NipKindTag::parse) { value(Relation.ABOUT_KIND, ValueType.KIND, it.toString(), NipKindTag.TAG_NAME) }
     }
 
     // The event the picture was taken from.
@@ -217,14 +224,14 @@ internal fun KindMappers.Builder.experimental() {
     on<RoadEventConfirmationEvent> { e ->
         val status = e.status()?.let { StatusProps(it.code) }
         each(e.tags, RoadReportTag::parse) { event(Relation.CONFIRMED, it, RoadReportTag.TAG_NAME, status) }
-        each(e.tags, GeoHashTag::parse) { tag(Relation.TAG, GeoHashTag.TAG_NAME, it) }
+        each(e.tags, GeoHashTag::parse) { value(Relation.LOCATION, ValueType.GEOHASH, it, GeoHashTag.TAG_NAME) }
     }
 
     // The road-event type code (`t`: police, accident…) and the location cells (`g`, at several precisions).
     on<RoadEventReportEvent> { e ->
         // The raw code, unknown types included, lowercased like any hashtag.
-        each(e.tags, RoadEventTypeTag::parseCode) { tag(Relation.HASHTAG, RoadEventTypeTag.TAG_NAME, it.lowercase()) }
-        each(e.tags, GeoHashTag::parse) { tag(Relation.TAG, GeoHashTag.TAG_NAME, it) }
+        each(e.tags, RoadEventTypeTag::parseCode) { value(Relation.HASHTAG, ValueType.HASHTAG, it.lowercase(), RoadEventTypeTag.TAG_NAME) }
+        each(e.tags, GeoHashTag::parse) { value(Relation.LOCATION, ValueType.GEOHASH, it, GeoHashTag.TAG_NAME) }
     }
 
     // The video credited and its author, with the answer: `status` (absent means accepted, see

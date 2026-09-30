@@ -21,6 +21,7 @@
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.quartz.nip01Core.tags.aTag.ATag
 import com.vitorpamplona.quartz.nip01Core.tags.kinds.KindTag
@@ -36,7 +37,7 @@ internal fun KindMappers.Builder.nip37Drafts() {
      * (ROOT) and the message it replies to (PARENT). `k` says which kind the draft is.
      */
     on<DraftWrapEvent> { e ->
-        each(e.tags, KindTag::parse) { tag(Relation.TAG, KindTag.TAG_NAME, it.toString()) }
+        each(e.tags, KindTag::parse) { value(Relation.DRAFT_KIND, ValueType.KIND, it.toString(), KindTag.TAG_NAME) }
         each(e.tags, MarkedETag::parseRoot) { event(Relation.ROOT, it, MarkedETag.TAG_NAME) }
         each(e.tags, MarkedETag::parseReply) { event(Relation.PARENT, it, MarkedETag.TAG_NAME) }
         each(e.tags, ATag::parse) { address(Relation.ROOT, it, ATag.TAG_NAME) }

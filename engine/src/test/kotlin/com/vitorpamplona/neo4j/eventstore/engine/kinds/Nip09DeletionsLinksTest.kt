@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.quartz.nip09Deletions.DeletionRequestEvent
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -57,8 +58,8 @@ class Nip09DeletionsLinksTest {
                 Link(Relation.DELETED, LinkTarget.Event(version), "e"),
                 Link(Relation.DELETED, LinkTarget.Address(article), "a"),
                 Link(Relation.DELETED_AUTHOR, LinkTarget.User(me), "p"),
-                Link(Relation.TAG, LinkTarget.Tag("k", "1"), "k"),
-                Link(Relation.TAG, LinkTarget.Tag("k", "30023"), "k"),
+                Link(Relation.DELETED_KIND, LinkTarget.Tag(ValueType.KIND, "1"), "k"),
+                Link(Relation.DELETED_KIND, LinkTarget.Tag(ValueType.KIND, "30023"), "k"),
             ),
             event.links(),
         )

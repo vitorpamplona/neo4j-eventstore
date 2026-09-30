@@ -34,14 +34,14 @@ internal fun KindMappers.Builder.nip84Highlights() {
     // text"), each `HIGHLIGHTED`. A `p` names "the original authors" (`HIGHLIGHTED_AUTHOR`, its
     // `role` — author, editor — riding along when written, `Nip84AttributionTag`); in a quote
     // highlight a `p` or `r` (`Nip84MarkedReferenceTag`) with the `mention` marker is named in the
-    // comment instead: a `MENTION`, or a plain URL `TAG`.
+    // comment instead: a `MENTION`, of a person or of a URL.
     on<HighlightEvent> { e ->
         each(e.tags, ATag::parse) { address(Relation.HIGHLIGHTED, it, ATag.TAG_NAME) }
         each(e.tags, ETag::parse) { event(Relation.HIGHLIGHTED, it, ETag.TAG_NAME) }
         each(e.tags, Nip84MarkedReferenceTag::parse) {
-            tag(if (it.isMention()) Relation.TAG else Relation.HIGHLIGHTED, Nip84MarkedReferenceTag.TAG_NAME, it.reference)
+            external(if (it.isMention()) Relation.MENTION else Relation.HIGHLIGHTED, it.reference, Nip84MarkedReferenceTag.TAG_NAME)
         }
-        each(e.tags, ReplyIdentifierTag::parse) { tag(Relation.HIGHLIGHTED, ReplyIdentifierTag.TAG_NAME, it) }
+        each(e.tags, ReplyIdentifierTag::parse) { external(Relation.HIGHLIGHTED, it, ReplyIdentifierTag.TAG_NAME) }
         each(e.tags, Nip84AttributionTag::parse) {
             if (it.isMention()) {
                 user(Relation.MENTION, it.pubKey, Nip84AttributionTag.TAG_NAME)

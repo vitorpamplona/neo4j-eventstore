@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.quartz.nip19Bech32.toNpub
 import com.vitorpamplona.quartz.nip99Classifieds.ClassifiedsEvent
 import com.vitorpamplona.quartz.utils.Hex
@@ -54,7 +55,7 @@ class Nip99ClassifiedsLinksTest {
                 Link(Relation.MENTION, LinkTarget.Event(cited), "e"),
                 Link(Relation.MENTION, LinkTarget.Address(listing), "a"),
                 Link(Relation.MENTION, LinkTarget.User(person), "p"),
-                Link(Relation.HASHTAG, LinkTarget.Tag("t", "cars"), "t"),
+                Link(Relation.HASHTAG, LinkTarget.Tag(ValueType.HASHTAG, "cars"), "t"),
                 Link(Relation.MENTION, LinkTarget.User("b".repeat(64)), Link.VIA_CONTENT),
             ),
             event.links(),

@@ -21,6 +21,7 @@
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.quartz.nip03Timestamp.OtsEvent
 import com.vitorpamplona.quartz.nip03Timestamp.tags.TargetEventKindTag
@@ -31,6 +32,9 @@ internal fun KindMappers.Builder.nip03Timestamp() {
     // NIP-03: the `e` is the event the proof timestamps, the `k` its kind.
     on<OtsEvent> { e ->
         each(e.tags, TargetEventTag::parseId) { event(Relation.TIMESTAMPED, it, TargetEventTag.TAG_NAME) }
-        each(e.tags, TargetEventKindTag::parse) { tag(Relation.TAG, TargetEventKindTag.TAG_NAME, it.toString()) }
+        each(
+            e.tags,
+            TargetEventKindTag::parse,
+        ) { value(Relation.TIMESTAMPED_KIND, ValueType.KIND, it.toString(), TargetEventKindTag.TAG_NAME) }
     }
 }

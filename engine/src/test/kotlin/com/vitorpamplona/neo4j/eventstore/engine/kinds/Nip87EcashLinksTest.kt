@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.PlatformProps
 import com.vitorpamplona.quartz.nip87Ecash.recommendation.MintRecommendationEvent
 import kotlin.test.Test
@@ -57,7 +58,7 @@ class Nip87EcashLinksTest {
             listOf(
                 Link(Relation.RECOMMENDED, LinkTarget.Address(mint), "a", PlatformProps("cashu")),
                 Link(Relation.RECOMMENDED, LinkTarget.Address(federation), "a", PlatformProps("fedimint")),
-                Link(Relation.TAG, LinkTarget.Tag("k", "38172"), "k"),
+                Link(Relation.RECOMMENDED_KIND, LinkTarget.Tag(ValueType.KIND, "38172"), "k"),
             ),
             event.links(),
         )

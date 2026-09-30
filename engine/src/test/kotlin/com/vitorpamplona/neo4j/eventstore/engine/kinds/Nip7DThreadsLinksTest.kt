@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.quartz.nip7DThreads.ThreadEvent
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -35,6 +36,6 @@ class Nip7DThreadsLinksTest {
     @Test
     fun threadNamesItsGroup() {
         val event = ThreadEvent(id, author, 1, arrayOf(arrayOf("title", "Hello"), arrayOf("h", "group")), "", sig)
-        assertEquals(listOf(Link(Relation.GROUP, LinkTarget.Tag("h", "group"), "h")), event.links())
+        assertEquals(listOf(Link(Relation.GROUP, LinkTarget.Tag(ValueType.GROUP, "group"), "h")), event.links())
     }
 }

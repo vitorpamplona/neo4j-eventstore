@@ -21,6 +21,7 @@
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.quartz.nip01Core.tags.aTag.ATag
 import com.vitorpamplona.quartz.nip01Core.tags.events.ETag
@@ -48,7 +49,7 @@ internal fun KindMappers.Builder.nip72ModCommunities() {
         each(e.tags, ApprovedEventTag::parse) { event(Relation.APPROVED, it.ref.eventId, ApprovedEventTag.TAG_NAME) }
         each(e.tags, ApprovedAddressTag::parse) { address(Relation.APPROVED, it.address, ApprovedAddressTag.TAG_NAME) }
         each(e.tags, PTag::parse) { user(Relation.APPROVED_AUTHOR, it, PTag.TAG_NAME) }
-        each(e.tags, KindTag::parse) { tag(Relation.TAG, KindTag.TAG_NAME, it.toString()) }
+        each(e.tags, KindTag::parse) { value(Relation.APPROVED_KIND, ValueType.KIND, it.toString(), KindTag.TAG_NAME) }
     }
 
     // NIP-72: a `p` with the `moderator` role is a `MODERATOR`. A `p` with no role is one too, as
@@ -73,7 +74,7 @@ internal fun KindMappers.Builder.nip72ModCommunities() {
     // pubkey is the `WOT_ROOT` of a web of trust `depth` hops deep; `k` names an allowed kind.
     on<CommunityRulesEvent> { e ->
         each(e.tags, CommunityTag::parse) { address(Relation.COMMUNITY, it.address, CommunityTag.TAG_NAME) }
-        each(e.tags, KindRuleTag::parse) { tag(Relation.TAG, KindRuleTag.TAG_NAME, it.kind.toString()) }
+        each(e.tags, KindRuleTag::parse) { value(Relation.ALLOWED_KIND, ValueType.KIND, it.kind.toString(), KindRuleTag.TAG_NAME) }
         each(e.tags, PubkeyRuleTag::parse) {
             // DENIED qualifies nothing: a deny rule's role, if it writes one, is no link prop.
             if (it.policy == PubkeyRuleTag.Policy.ALLOW) {

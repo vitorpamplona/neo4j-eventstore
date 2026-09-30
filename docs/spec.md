@@ -133,11 +133,13 @@ in both of its writer processes, relay and sync.
   what it erased. It would also break the relay's `as? VespaEventStore` casts.
 - *Fallback, if the hook is refused:* §6.4.
 
-**D3 — Every kind is projected, and a tag policy decides which non-reference tags become
-nodes** (§4.4).
+**D3 — Every kind is projected, and each kind's mapper decides which values become nodes**
+(§4.4).
 - All event kinds Vespa holds are kept, DMs and gift wraps included.
-- Single-letter tags that are not references become `:Tag` nodes only for an allowlist of names:
-  `t`, for example, but not `x` file hashes, which would add one useless node per event.
+- A value becomes a `:Tag` node only where a kind's mapper gives it a role (a note's `t` is a
+  `HASHTAG`, its `g` a `LOCATION`), typed by what it is; a kind 1's `x` file hashes do not,
+  which would add one useless node per event. *Built (2.0):* 1.x had a global allowlist of
+  letters.
 - A kind exclude list exists as an operator knob, **empty by default**.
 
 **Modules** (repo `neo4j-eventstore`; a rename is open question Q5):
@@ -183,7 +185,7 @@ by the plan's P7 measurement on a staging slice.
 |---|---|---|
 | `:Event` nodes | 500M | Every kind (§4.4), plus stubs for referenced-but-absent events |
 | `:User` nodes | 62M | One per pubkey that authored or was referenced |
-| `:Address` / `:Tag` nodes | tens of millions | Addressables plus referenced replaceables only (§4.1); allowlisted tag names only |
+| `:Address` / `:Tag` nodes | tens of millions | Addressables plus referenced replaceables only (§4.1); values a mapper gives a role only |
 | Relationships | **3–6B** | 500M `AUTHOR` edges, plus references (~1–2B), plus current follow lists (≈10–20M lists × a few hundred `FOLLOW` each) |
 | Store on disk | **~300–450 GB** | Record ("aligned") format: 34 B per relationship record and 15 B per node record. Id strings (64-hex) and their unique index are a large share: ~100 GB for events alone. |
 | With bodies (not done) | roughly ×2 | The reason bodies stay in Vespa |
@@ -215,7 +217,7 @@ Consequences:
 | `:Event` (stub) | `id` | none | Something references an id we do not hold (never seen, excluded, or removed) |
 | `:User` | `pubkey` | none: names stay on the kind 0 that states them (§4.3) | It authored, or was referenced |
 | `:Address` | `id` = `kind:pubkey:d` (Quartz `AddressSerializer` form) | `kind`, `pubkey`, `d` | Any **addressable** event (30000–39999), or a reference to any address, including a replaceable one such as `10002:<pk>:` |
-| `:Tag` | `key` = `name:value` | `name`, `value` | A value a kind's mapper links that is not an event, user or address: a hashtag, a URL, an external id, a group id (§5) |
+| `:Tag` | `key` = `type:value` | `type`, `value` | A value a kind's mapper links that is not an event, user or address, keyed by what it is (a hashtag, a URL, a kind, an external id, a group id), never by the tag letter that carried it (§5, `docs/relations.md`) |
 | `:Meta` | singleton | `schema_version`, `policy_hash`, `derivation_version`, `derived` | Written by `SchemaInstaller` |
 
 - **The author is an edge, not a property.** An event's author is its `AUTHOR` edge. Dropping a
@@ -387,7 +389,7 @@ and content `"… nostr:npub1<Y> … nostr:nsec1<Z> …"` projects to:
 (ev)-[:ROOT {via:"e"}]->(:Event {id:R})
 (ev)-[:PARENT {via:"e"}]->(:Event {id:P})
 (ev)-[:MENTION {via:"p"}]->(:User {pubkey:X})   // PARENT_AUTHOR if X were P's author
-(ev)-[:HASHTAG {via:"t"}]->(:Tag {key:"t:nostr"})
+(ev)-[:HASHTAG {via:"t"}]->(:Tag {key:"hashtag:nostr"})
 (ev)-[:MENTION {via:"content"}]->(:User {pubkey:Y})
 // x: a kind 1 does not link its file hashes. nsec1<Z>: never written.
 ```
@@ -698,7 +700,7 @@ label:
     `{"id", "stored": false}`.
 - A stub `:Event` is `{"id", "stored": false}`.
 - `:User` is `{"pubkey"}`, `:Address` is `{"address", "kind", "pubkey", "d"}`, and
-  `:Tag` is `{"name", "value"}`.
+  `:Tag` is `{"type", "value"}`.
 - A relationship is `{"type", "start", "end", …props}`, and a path is an alternating list.
 - Integers outside ±2^53 are strings.
 
@@ -788,8 +790,8 @@ WHERE a.rank >= 80
 RETURN u, a.rank ORDER BY a.rank DESC;
 
 // T11 — hashtags used alongside #bitcoin in the last day
-MATCH (:Tag {key: 't:bitcoin'})<-[:HASHTAG]-(n:Data)-[:HASHTAG]->(o:Tag)
-WHERE n.created_at >= $since AND o.key <> 't:bitcoin'
+MATCH (:Tag {key: 'hashtag:bitcoin'})<-[:HASHTAG]-(n:Data)-[:HASHTAG]->(o:Tag)
+WHERE n.created_at >= $since AND o.key <> 'hashtag:bitcoin'
 RETURN o.value, count(*) AS uses ORDER BY uses DESC LIMIT 20;
 
 // Hybrid — full-text search in Vespa first (ids from a NIP-50 REQ), then graph in Cypher

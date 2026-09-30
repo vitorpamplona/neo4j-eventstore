@@ -22,6 +22,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkBuilder
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.quartz.nip01Core.tags.people.PTag
 import com.vitorpamplona.quartz.nip18Reposts.quotes.QAddressableTag
@@ -55,7 +56,7 @@ internal fun KindMappers.Builder.nipC7Chats() {
         // them: the `q` already made them the PARENT_AUTHOR, so that `p` adds nothing.
         val parentAuthorKey = LinkBuilder.normalizedHex(parentAuthor)
         each(e.tags, PTag::parse) { if (LinkBuilder.normalizedHex(it.pubKey) != parentAuthorKey) user(Relation.MENTION, it, PTag.TAG_NAME) }
-        each(e.tags, GroupIdTag::parse) { tag(Relation.GROUP, GroupIdTag.TAG_NAME, it) }
+        each(e.tags, GroupIdTag::parse) { value(Relation.GROUP, ValueType.GROUP, it, GroupIdTag.TAG_NAME) }
         contentMentions(e.content)
     }
 }

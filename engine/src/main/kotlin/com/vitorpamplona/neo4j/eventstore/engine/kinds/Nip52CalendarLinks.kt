@@ -22,6 +22,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkBuilder
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.RsvpProps
 import com.vitorpamplona.quartz.nip01Core.core.TagArray
@@ -61,6 +62,6 @@ private fun LinkBuilder.nip52CalendarSlotLinks(tags: TagArray) {
     each(tags, Nip52SlotParticipantTag::parse) { user(Relation.PARTICIPANT, it.pubKey, Nip52SlotParticipantTag.TAG_NAME, it.linkProps()) }
     each(tags, ATag::parse) { address(Relation.CALENDAR, it, ATag.TAG_NAME) }
     hashtags(tags)
-    each(tags, GeoHashTag::parse) { tag(Relation.TAG, GeoHashTag.TAG_NAME, it) }
-    each(tags, ReferenceTag::parse) { tag(Relation.TAG, ReferenceTag.TAG_NAME, it) }
+    each(tags, GeoHashTag::parse) { value(Relation.LOCATION, ValueType.GEOHASH, it, GeoHashTag.TAG_NAME) }
+    each(tags, ReferenceTag::parse) { value(Relation.REFERENCE, ValueType.URL, it, ReferenceTag.TAG_NAME) }
 }

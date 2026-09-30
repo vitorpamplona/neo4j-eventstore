@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.AuctionProps
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.BidProps
 import com.vitorpamplona.quartz.nip15Marketplace.auction.AuctionEvent
@@ -80,8 +81,8 @@ class Nip15MarketplaceLinksTest {
         val content = "{\"id\":\"item\",\"stall_id\":\"stall\",\"name\":\"Radio\"}"
         val expected =
             listOf(
-                Link(Relation.HASHTAG, LinkTarget.Tag("t", "electronics"), "t"),
-                Link(Relation.HASHTAG, LinkTarget.Tag("t", "books"), "t"),
+                Link(Relation.HASHTAG, LinkTarget.Tag(ValueType.HASHTAG, "electronics"), "t"),
+                Link(Relation.HASHTAG, LinkTarget.Tag(ValueType.HASHTAG, "books"), "t"),
             )
         assertEquals(expected, ProductEvent(id, merchant, 1, tags, content, sig).links())
         assertEquals(expected, AuctionEvent(id, merchant, 1, tags, content, sig).links())

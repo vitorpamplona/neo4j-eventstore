@@ -21,6 +21,7 @@
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.quartz.nip22Comments.tags.ReplyAddressTag
 import com.vitorpamplona.quartz.nip22Comments.tags.ReplyIdentifierTag
@@ -46,8 +47,8 @@ internal fun KindMappers.Builder.nipA0VoiceMessages() {
         if (e.nipA0HasRootScope()) {
             each(e.tags, RootEventTag::parseKey) { event(Relation.ROOT, it, RootEventTag.TAG_NAME) }
             each(e.tags, RootAddressTag::parseAddressId) { address(Relation.ROOT, it, RootAddressTag.TAG_NAME) }
-            each(e.tags, RootIdentifierTag.Companion::parse) { tag(Relation.ROOT, RootIdentifierTag.TAG_NAME, it) }
-            each(e.tags, RootKindTag::parse) { tag(Relation.TAG, RootKindTag.TAG_NAME, it) }
+            each(e.tags, RootIdentifierTag.Companion::parse) { external(Relation.ROOT, it, RootIdentifierTag.TAG_NAME) }
+            each(e.tags, RootKindTag::parse) { value(Relation.ROOT_KIND, ValueType.KIND, it, RootKindTag.TAG_NAME) }
             each(e.tags, RootAuthorTag::parseKey) { user(Relation.ROOT_AUTHOR, it, RootAuthorTag.TAG_NAME) }
         } else if (e.nipA0RepliesToVoiceMessage()) {
             // An older reply to a voice message: its parent is also its root (see rootScopeTags).
@@ -56,8 +57,8 @@ internal fun KindMappers.Builder.nipA0VoiceMessages() {
         }
         each(e.tags, ReplyEventTag::parseKey) { event(Relation.PARENT, it, ReplyEventTag.TAG_NAME) }
         each(e.tags, ReplyAddressTag::parseAddressId) { address(Relation.PARENT, it, ReplyAddressTag.TAG_NAME) }
-        each(e.tags, ReplyIdentifierTag::parse) { tag(Relation.PARENT, ReplyIdentifierTag.TAG_NAME, it) }
-        each(e.tags, ReplyKindTag::parse) { tag(Relation.TAG, ReplyKindTag.TAG_NAME, it) }
+        each(e.tags, ReplyIdentifierTag::parse) { external(Relation.PARENT, it, ReplyIdentifierTag.TAG_NAME) }
+        each(e.tags, ReplyKindTag::parse) { value(Relation.PARENT_KIND, ValueType.KIND, it, ReplyKindTag.TAG_NAME) }
         each(e.tags, ReplyAuthorTag::parseKey) { user(Relation.PARENT_AUTHOR, it, ReplyAuthorTag.TAG_NAME) }
     }
 

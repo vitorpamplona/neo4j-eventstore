@@ -104,7 +104,7 @@ out.append(f'<rect width="{W}" height="{H}" fill="#fff"/>')
 text(40, 58, "neo4j-eventstore — graph schema 2.0", size=34, weight="bold", anchor="start")
 text(
     40, 90,
-    "Nodes: 4 labels. Relationship type = what the target IS to the event that states it (172 relations, docs/vocabulary.md).",
+    "Nodes: 4 labels. Relationship type = what the target IS to the event that states it (193 relations, docs/relations.md).",
     size=17, anchor="start", fill="#444",
 )
 
@@ -152,11 +152,11 @@ text(TX + 66, 360, "a stub: referenced,", size=13, anchor="start", fill="#444")
 text(TX + 66, 377, "not held (id only)", size=13, anchor="start", fill="#444")
 text(TX + 66, 545, "anyone referenced", size=13, anchor="start", fill="#444")
 text(TX + 66, 720, "a coordinate, held or not", size=13, anchor="start", fill="#444")
-props(TX + 66, 880, ["key:  name:value", "name:  t, i, k, r, g, h…", "value:"], anchor="start", size=14)
+props(TX + 66, 880, ["key:  type:value", "type:  hashtag, url, kind, geohash…", "value:"], anchor="start", size=14)
 
 # legend / rules box
 LX, LY = 1940, 150
-out.append(f'<rect x="{LX}" y="{LY}" width="480" height="610" rx="14" fill="#F6F7F9" stroke="#999" stroke-width="1.5"/>')
+out.append(f'<rect x="{LX}" y="{LY}" width="480" height="690" rx="14" fill="#F6F7F9" stroke="#999" stroke-width="1.5"/>')
 text(LX + 20, LY + 38, "Rules", size=20, weight="bold", anchor="start")
 rules = [
     "Every relationship starts at an",
@@ -182,6 +182,10 @@ rules = [
     "Stubs keep references alive; a",
     "removed event becomes a stub.",
     "Private keys never become nodes.",
+    "",
+    "Every edge is its event's claim;",
+    "only AUTHOR is signed fact.",
+    "A value is keyed by what it is.",
 ]
 for i, l in enumerate(rules):
     text(LX + 20, LY + 72 + i * 22, l, size=15, anchor="start")
@@ -230,7 +234,7 @@ def panel(col, row, title, sources):
 
 panel(0, 0, "Conversation — NIP-10 notes, NIP-22 comments", [
     ("kind 1 / 1111", [
-        ("ROOT", ["also an :Address or i: :Tag"], "E", "root"),
+        ("ROOT", ["also an :Address, or a url: / external: :Tag"], "E", "root"),
         ("PARENT", [], "E", "parent"),
         ("PARENT_AUTHOR", [], "U", ""),
         ("MENTION", ["via: p | e | content"], "U", ""),
@@ -252,7 +256,7 @@ panel(2, 0, "Zaps — NIP-57", [
         ("ZAPPED", ["msats"], "E", "or :Address"),
         ("ZAP_RECIPIENT", ["msats"], "U", ""),
         ("ZAP_SENDER", ["via: P | description"], "U", ""),
-        ("TAG", ["via: k"], "T", "k:1"),
+        ("ZAPPED_KIND", ["via: k"], "T", "kind:1"),
     ]),
 ])
 panel(3, 0, "Social graph and lists — kind 3, NIP-51", [
@@ -296,14 +300,14 @@ panel(2, 1, "Communities, groups, badges, events", [
     ]),
     ("kind 31925", [("CALENDAR_EVENT", ["status"], "A", "31922/3")]),
 ])
-panel(3, 1, "Topics and tags any kind may carry", [
+panel(3, 1, "Values, and tags any kind may carry", [
     ("any kind", [
-        ("HASHTAG", ["via: t (lowercased)"], "T", "t:nostr"),
-        ("TAG", ["via: i / r / k / g"], "T", "i:isbn:…"),
-        ("GROUP", ["via: h"], "T", "h:<group>"),
+        ("HASHTAG", ["via: t / i #…"], "T", "hashtag:nostr"),
+        ("LOCATION", ["via: g"], "T", "geohash:u4pr"),
+        ("REFERENCE", ["via: r"], "T", "url:https://…"),
+        ("GROUP", ["via: h"], "T", "group:<id>"),
         ("CLIENT", ["via: client"], "A", "31990"),
         ("ZAP_SPLIT", ["weight"], "U", ""),
-        ("EMOJI_SET", ["via: emoji"], "A", "30030"),
     ]),
 ])
 
@@ -316,8 +320,9 @@ for kind, name in [("User", ":User"), ("Event", ":Event:Data"), ("Stub", ":Event
     text(x + 28, ly, name, size=16, anchor="start")
     x += 190
 SHOWN.update({"AUTHOR", "ADDRESS", "PARENT", "MENTION", "REPORTED_USER", "QUOTE", "HASHTAG"})
+TOTAL = 193
 text(40, PY0 + 2 * (PH + 20) + 20,
-     f"+ {172 - len(SHOWN)} more relations, e.g. CITED, HIGHLIGHTED, PARTICIPANT, POLL, VOTED, WOT_ROOT, EDITED, FORK … — each with its targets and kinds in docs/vocabulary.md",
+     f"+ {TOTAL - len(SHOWN)} more relations, e.g. CITED, HIGHLIGHTED, ROOT_KIND, LANGUAGE, POLL, VOTED, WOT_ROOT, FORK … — every one with its targets in docs/relations.md",
      size=16, anchor="start", fill="#444")
 
 svg = (

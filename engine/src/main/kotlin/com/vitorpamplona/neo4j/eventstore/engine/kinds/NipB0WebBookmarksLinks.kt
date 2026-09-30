@@ -21,6 +21,7 @@
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.quartz.nip01Core.tags.dTag.DTag
 import com.vitorpamplona.quartz.nip01Core.tags.references.ReferenceTag
 import com.vitorpamplona.quartz.nipB0WebBookmarks.WebBookmarkEvent
@@ -32,7 +33,7 @@ internal fun KindMappers.Builder.nipB0WebBookmarks() {
     // (`url()` restores the scheme NIP-B0 drops) as an `r` value, the node every other reference to
     // that URL shares.
     on<WebBookmarkEvent> { e ->
-        tag(Relation.BOOKMARK, ReferenceTag.TAG_NAME, e.url(), via = DTag.TAG_NAME)
+        value(Relation.BOOKMARK, ValueType.URL, e.url(), DTag.TAG_NAME)
         hashtags(e.tags)
     }
 }

@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.FoundProps
 import com.vitorpamplona.quartz.nip19Bech32.entities.NAddress
 import com.vitorpamplona.quartz.nipCCGeocaching.curation.GeocacheCurationListEvent
@@ -83,8 +84,8 @@ class NipCCGeocachingLinksTest {
             listOf(
                 Link(Relation.WINNER, LinkTarget.User(finder), "F"),
                 Link(Relation.VERIFIER, LinkTarget.User(verifier), "verification"),
-                Link(Relation.HASHTAG, LinkTarget.Tag("t", "traditional"), "t"),
-                Link(Relation.TAG, LinkTarget.Tag("g", "u4pruy"), "g"),
+                Link(Relation.HASHTAG, LinkTarget.Tag(ValueType.HASHTAG, "traditional"), "t"),
+                Link(Relation.LOCATION, LinkTarget.Tag(ValueType.GEOHASH, "u4pruy"), "g"),
             ),
             event.links(),
         )
@@ -104,7 +105,7 @@ class NipCCGeocachingLinksTest {
         assertEquals(
             listOf(
                 Link(Relation.CURATED, LinkTarget.Address(cache), "a"),
-                Link(Relation.TAG, LinkTarget.Tag("g", "u4pr"), "g"),
+                Link(Relation.LOCATION, LinkTarget.Tag(ValueType.GEOHASH, "u4pr"), "g"),
             ),
             event.links(),
         )

@@ -21,6 +21,7 @@
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.PositionProps
 import com.vitorpamplona.quartz.nip01Core.tags.geohash.GeoHashTag
@@ -41,6 +42,6 @@ internal fun KindMappers.Builder.nip68Picture() {
             image.userAnnotations()?.forEach { user(Relation.TAGGED, it.pubkey, IMetaTag.TAG_NAME, PositionProps(it.x, it.y)) }
         }
         hashtags(e.tags)
-        each(e.tags, GeoHashTag::parse) { tag(Relation.TAG, GeoHashTag.TAG_NAME, it) }
+        each(e.tags, GeoHashTag::parse) { value(Relation.LOCATION, ValueType.GEOHASH, it, GeoHashTag.TAG_NAME) }
     }
 }

@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.LabelProps
 import com.vitorpamplona.quartz.nip32Labeling.LabelEvent
 import kotlin.test.Test
@@ -60,14 +61,14 @@ class Nip32LabelingLinksTest {
 
         assertEquals(
             listOf(
-                Link(Relation.TAG, LinkTarget.Tag("L", "ISO-639-1"), "L"),
-                Link(Relation.TAG, LinkTarget.Tag("l", "en"), "l"),
-                Link(Relation.TAG, LinkTarget.Tag("l", "nsfw"), "l"),
+                Link(Relation.LABEL_NAMESPACE, LinkTarget.Tag(ValueType.LABEL_NAMESPACE, "ISO-639-1"), "L"),
+                Link(Relation.LABEL, LinkTarget.Tag(ValueType.LABEL, "en"), "l"),
+                Link(Relation.LABEL, LinkTarget.Tag(ValueType.LABEL, "nsfw"), "l"),
                 Link(Relation.LABELED, LinkTarget.Event(note), "e", labels),
                 Link(Relation.LABELED, LinkTarget.User(person), "p", labels),
                 Link(Relation.LABELED, LinkTarget.Address("30023:$person:post"), "a", labels),
-                Link(Relation.LABELED, LinkTarget.Tag("t", "bitcoin"), "t", labels),
-                Link(Relation.LABELED, LinkTarget.Tag("r", "wss://relay.example/"), "r", labels),
+                Link(Relation.LABELED, LinkTarget.Tag(ValueType.HASHTAG, "bitcoin"), "t", labels),
+                Link(Relation.LABELED, LinkTarget.Tag(ValueType.URL, "wss://relay.example/"), "r", labels),
             ),
             event.links(),
         )
@@ -78,8 +79,8 @@ class Nip32LabelingLinksTest {
         val event = LabelEvent(id, me, 1L, arrayOf(arrayOf("L", "#t"), arrayOf("l", "nostr", "#t")), "", sig)
         assertEquals(
             listOf(
-                Link(Relation.TAG, LinkTarget.Tag("L", "#t"), "L"),
-                Link(Relation.TAG, LinkTarget.Tag("l", "nostr"), "l"),
+                Link(Relation.LABEL_NAMESPACE, LinkTarget.Tag(ValueType.LABEL_NAMESPACE, "#t"), "L"),
+                Link(Relation.LABEL, LinkTarget.Tag(ValueType.LABEL, "nostr"), "l"),
             ),
             event.links(),
         )

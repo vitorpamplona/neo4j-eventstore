@@ -22,6 +22,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkBuilder
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.quartz.nip01Core.core.HexKey
 import com.vitorpamplona.quartz.nip01Core.core.TagArray
@@ -68,7 +69,11 @@ internal fun KindMappers.Builder.nip34Git() {
             }
         }
         each(e.tags, HashtagTag::parseLowercase) {
-            if (it != GitPatchEvent.ROOT && it != GitPatchEvent.ROOT_REVISION) tag(Relation.HASHTAG, HashtagTag.TAG_NAME, it)
+            if (it != GitPatchEvent.ROOT &&
+                it != GitPatchEvent.ROOT_REVISION
+            ) {
+                value(Relation.HASHTAG, ValueType.HASHTAG, it, HashtagTag.TAG_NAME)
+            }
         }
         nip34CommitLinks(e.tags)
     }
@@ -104,7 +109,7 @@ internal fun KindMappers.Builder.nip34Git() {
     on<GitRepositoryEvent> { e ->
         e.maintainers().forEach { user(Relation.MAINTAINER, it, MaintainersTag.TAG_NAME) }
         hashtags(e.tags)
-        tag(Relation.TAG, Nip34CommitTag.TAG_NAME, e.earliestUniqueCommit())
+        value(Relation.REPOSITORY, ValueType.GIT_COMMIT, e.earliestUniqueCommit(), Nip34CommitTag.TAG_NAME)
         each(e.tags, Nip34UpstreamTag::parse) { address(Relation.FORK, it, Nip34UpstreamTag.TAG_NAME) }
     }
 
@@ -230,6 +235,6 @@ private fun LinkBuilder.nip34GitPeopleLinks(
     if (!named) user(Relation.MENTION, key, PTag.TAG_NAME)
 }
 
-/** The earliest unique commit NIP-34 names the target repository by, as a [Relation.TAG]. */
+/** The earliest unique commit NIP-34 names the target repository by, as its [Relation.REPOSITORY]. */
 private fun LinkBuilder.nip34CommitLinks(tags: TagArray) =
-    each(tags, Nip34CommitTag::parseReference) { tag(Relation.TAG, Nip34CommitTag.TAG_NAME, it) }
+    each(tags, Nip34CommitTag::parseReference) { value(Relation.REPOSITORY, ValueType.GIT_COMMIT, it, Nip34CommitTag.TAG_NAME) }

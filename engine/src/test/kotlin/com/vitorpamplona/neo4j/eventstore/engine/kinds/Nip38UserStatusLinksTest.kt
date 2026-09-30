@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.quartz.nip38UserStatus.UserStatusEvent
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -50,7 +51,7 @@ class Nip38UserStatusLinksTest {
 
         assertEquals(
             listOf(
-                Link(Relation.TAG, LinkTarget.Tag("r", "spotify:search:Intergalatic%20-%20Beastie%20Boys"), "r"),
+                Link(Relation.REFERENCE, LinkTarget.Tag(ValueType.URL, "spotify:search:Intergalatic%20-%20Beastie%20Boys"), "r"),
                 Link(Relation.LINKED, LinkTarget.User(person), "p"),
                 Link(Relation.LINKED, LinkTarget.Event(note), "e"),
                 Link(Relation.LINKED, LinkTarget.Address("30023:$person:post"), "a"),

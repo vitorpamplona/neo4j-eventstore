@@ -21,6 +21,7 @@
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.quartz.marmot.mip00KeyPackages.KeyPackageEvent
 import com.vitorpamplona.quartz.marmot.mip00KeyPackages.KeyPackageRelayListEvent
@@ -37,7 +38,7 @@ import com.vitorpamplona.quartz.marmot.mip05PushNotifications.TokenRequestEvent
 /** Quartz's `marmot` classes. */
 internal fun KindMappers.Builder.marmot() {
     // The KeyPackageRef (`i`), the lookup key a Welcome's inviter resolves.
-    on<KeyPackageEvent> { e -> tag(Relation.TAG, KeyPackageRefTag.TAG_NAME, e.keyPackageRef()) }
+    on<KeyPackageEvent> { e -> value(Relation.KEY_PACKAGE_REF, ValueType.KEY_PACKAGE_REF, e.keyPackageRef(), KeyPackageRefTag.TAG_NAME) }
     free<KeyPackageRelayListEvent>()
 
     // The KeyPackage this Welcome consumed, and the group (its `h`: the Marmot nostr_group_id,
@@ -45,13 +46,13 @@ internal fun KindMappers.Builder.marmot() {
     // ever sees these links.
     on<WelcomeEvent> { e ->
         event(Relation.KEY_PACKAGE, e.keyPackageEventId(), KeyPackageEventTag.TAG_NAME)
-        each(e.tags, GroupIdTag::parse) { tag(Relation.GROUP, GroupIdTag.TAG_NAME, it) }
+        each(e.tags, GroupIdTag::parse) { value(Relation.GROUP, ValueType.GROUP, it, GroupIdTag.TAG_NAME) }
     }
 
     // The group, by its `h` (the nostr_group_id, a random global id). The signer is a fresh
     // ephemeral key per event, so the `AUTHOR` link every event states is a throwaway here; the
     // inner rumors carry their own links once decrypted.
-    on<GroupEvent> { e -> each(e.tags, GroupIdTag::parse) { tag(Relation.GROUP, GroupIdTag.TAG_NAME, it) } }
+    on<GroupEvent> { e -> each(e.tags, GroupIdTag::parse) { value(Relation.GROUP, ValueType.GROUP, it, GroupIdTag.TAG_NAME) } }
 
     free<NotificationRequestEvent>()
     // Member and server keys live in the JSON content (an inner group payload), which a mapper does not parse.

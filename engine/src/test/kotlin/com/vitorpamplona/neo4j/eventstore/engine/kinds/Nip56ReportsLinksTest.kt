@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.ReportProps
 import com.vitorpamplona.quartz.nip01Core.core.TagArray
 import com.vitorpamplona.quartz.nip56Reports.ReportEvent
@@ -80,9 +81,9 @@ class Nip56ReportsLinksTest {
                 Link(Relation.REPORTED_AUTHOR, LinkTarget.User(person), "p", props("nudity", "nudity")),
                 // no type of its own: the report's default (the first one written)
                 Link(Relation.REPORTED, LinkTarget.Address("30023:$person:post"), "a", props("spam", "spam 📣")),
-                Link(Relation.REPORTED, LinkTarget.Tag("x", blob), "x", props("malware", "malware")),
-                Link(Relation.TAG, LinkTarget.Tag("L", "social.nos.ontology"), "L"),
-                Link(Relation.TAG, LinkTarget.Tag("l", "NS-spam"), "l"),
+                Link(Relation.REPORTED, LinkTarget.Tag(ValueType.SHA256, blob), "x", props("malware", "malware")),
+                Link(Relation.LABEL_NAMESPACE, LinkTarget.Tag(ValueType.LABEL_NAMESPACE, "social.nos.ontology"), "L"),
+                Link(Relation.LABEL, LinkTarget.Tag(ValueType.LABEL, "NS-spam"), "l"),
             ),
             event.links(),
         )
@@ -122,7 +123,7 @@ class Nip56ReportsLinksTest {
         assertEquals(
             listOf(
                 Link(Relation.REPORTED_AUTHOR, LinkTarget.User(person), "p", props("spam", "spam")),
-                Link(Relation.REPORTED, LinkTarget.Tag("x", blob), "x", props("spam", "spam")),
+                Link(Relation.REPORTED, LinkTarget.Tag(ValueType.SHA256, blob), "x", props("spam", "spam")),
             ),
             event.links(),
         )

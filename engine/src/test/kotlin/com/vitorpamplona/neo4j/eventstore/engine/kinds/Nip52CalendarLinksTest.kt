@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.ParticipantProps
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.RsvpProps
 import com.vitorpamplona.quartz.nip52Calendar.appt.day.CalendarDateSlotEvent
@@ -58,9 +59,9 @@ class Nip52CalendarLinksTest {
                 Link(Relation.PARTICIPANT, LinkTarget.User(host), "p", ParticipantProps(listOf("host"))),
                 Link(Relation.PARTICIPANT, LinkTarget.User(guest), "p"),
                 Link(Relation.CALENDAR, LinkTarget.Address(calendar), "a"),
-                Link(Relation.HASHTAG, LinkTarget.Tag("t", "meetup"), "t"),
-                Link(Relation.TAG, LinkTarget.Tag("g", "u4pruy"), "g"),
-                Link(Relation.TAG, LinkTarget.Tag("r", "https://example.com"), "r"),
+                Link(Relation.HASHTAG, LinkTarget.Tag(ValueType.HASHTAG, "meetup"), "t"),
+                Link(Relation.LOCATION, LinkTarget.Tag(ValueType.GEOHASH, "u4pruy"), "g"),
+                Link(Relation.REFERENCE, LinkTarget.Tag(ValueType.URL, "https://example.com"), "r"),
             )
         assertEquals(expected, CalendarDateSlotEvent(id, host, 1, tags, "", sig).links())
         assertEquals(expected, CalendarTimeSlotEvent(id, host, 1, tags, "", sig).links())

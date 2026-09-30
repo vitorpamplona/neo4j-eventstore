@@ -120,7 +120,7 @@ class ShowcaseQueriesIT {
     fun theShowcaseQueriesAnswerAsDocumented(): Unit =
         runBlocking {
             val queries = showcase()
-            assertEquals((1..17).map { "S$it" }, queries.keys.toList(), "the docs' showcase labels")
+            assertEquals((1..18).map { "S$it" }, queries.keys.toList(), "the docs' showcase labels")
 
             // The social graph: I follow f1, f2 and fan; they follow x, the suspect and r1–r3.
             val note = ev(1, me, content = "N")
@@ -146,6 +146,8 @@ class ShowcaseQueriesIT {
                     // Reactions to my note, and my trust provider's rank of one reactor.
                     ev(7, r1, listOf(listOf("e", note.id), listOf("p", me)), "+"),
                     ev(7, fan, listOf(listOf("e", note.id), listOf("p", me)), "🤙"),
+                    // A reaction to my note that names x as its author: a wrong claim (S18).
+                    ev(7, r3, listOf(listOf("e", note.id), listOf("p", x)), "+"),
                     ev(10040, me, listOf(listOf("30382:rank", provider, "wss://scores.example/"))),
                     ev(30382, provider, listOf(listOf("d", r1), listOf("rank", "90"))),
                     // A zap from fan (the receipt copies the sender into `P`).
@@ -268,7 +270,11 @@ class ShowcaseQueriesIT {
             assertEquals(2L, s16[0].num(0), "S16 $s16")
 
             val s17 = q("S17")[0]
-            assertEquals(listOf(2L, 0L, 0L, 3L, 5L, 1L), (1..6).map { s17.num(it) }, "S17 $s17")
+            assertEquals(listOf(3L, 0L, 0L, 3L, 5L, 1L), (1..6).map { s17.num(it) }, "S17 $s17")
+
+            val s18 = q("S18")
+            assertEquals(listOf(listOf(note.id, me, x)), s18.map { listOf(it.str(0), it.str(1), it.str(2)) }, "S18 $s18")
+            assertEquals(1L, s18[0].num(3), "S18 $s18")
             driver.close()
         }
 }

@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkBuilder
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.NoProps
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.ZapSplitProps
@@ -62,7 +63,8 @@ fun LinkBuilder.everyKindLinks(tags: TagArray) {
 }
 
 /** NIP-24 `t` tags ([HashtagTag]). Hashtags are case-insensitive, so the value is lowercased: #Nostr is #nostr. */
-fun LinkBuilder.hashtags(tags: TagArray) = each(tags, HashtagTag::parse) { tag(Relation.HASHTAG, HashtagTag.TAG_NAME, it.lowercase()) }
+fun LinkBuilder.hashtags(tags: TagArray) =
+    each(tags, HashtagTag::parse) { value(Relation.HASHTAG, ValueType.HASHTAG, it.lowercase(), HashtagTag.TAG_NAME) }
 
 /**
  * NIP-18 `q` tags ([QTag]): an event or an address, as [Relation.QUOTE] (or [relation]). Read the

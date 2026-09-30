@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.OrderProps
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.RoleProps
 import com.vitorpamplona.quartz.nip29RelayGroups.metadata.GroupAdminsEvent
@@ -48,7 +49,7 @@ class Nip29RelayGroupsLinksTest {
     private val bob = "2".repeat(64)
     private val note = "3".repeat(64)
     private val article = "30023:$alice:post"
-    private val group = Link(Relation.GROUP, LinkTarget.Tag("h", "pizza"), "h")
+    private val group = Link(Relation.GROUP, LinkTarget.Tag(ValueType.GROUP, "pizza"), "h")
 
     @Test
     fun putAndRemoveUserLinkTheGroupAndTheMember() {
@@ -105,10 +106,10 @@ class Nip29RelayGroupsLinksTest {
         assertEquals(
             listOf(
                 group,
-                Link(Relation.PARENT, LinkTarget.Tag("h", "food"), "parent"),
-                Link(Relation.CHILD, LinkTarget.Tag("h", "margherita"), "child"),
-                Link(Relation.HASHTAG, LinkTarget.Tag("t", "italian"), "t"),
-                Link(Relation.TAG, LinkTarget.Tag("g", "u4pr"), "g"),
+                Link(Relation.PARENT, LinkTarget.Tag(ValueType.GROUP, "food"), "parent"),
+                Link(Relation.CHILD, LinkTarget.Tag(ValueType.GROUP, "margherita"), "child"),
+                Link(Relation.HASHTAG, LinkTarget.Tag(ValueType.HASHTAG, "italian"), "t"),
+                Link(Relation.LOCATION, LinkTarget.Tag(ValueType.GEOHASH, "u4pr"), "g"),
             ),
             event.links(),
         )
@@ -150,11 +151,11 @@ class Nip29RelayGroupsLinksTest {
             )
         assertEquals(
             listOf(
-                Link(Relation.PARENT, LinkTarget.Tag("h", "food"), "parent"),
-                Link(Relation.CHILD, LinkTarget.Tag("h", "margherita"), "child"),
-                Link(Relation.CHILD, LinkTarget.Tag("h", "calzone"), "child"),
-                Link(Relation.HASHTAG, LinkTarget.Tag("t", "italian"), "t"),
-                Link(Relation.TAG, LinkTarget.Tag("g", "u4pr"), "g"),
+                Link(Relation.PARENT, LinkTarget.Tag(ValueType.GROUP, "food"), "parent"),
+                Link(Relation.CHILD, LinkTarget.Tag(ValueType.GROUP, "margherita"), "child"),
+                Link(Relation.CHILD, LinkTarget.Tag(ValueType.GROUP, "calzone"), "child"),
+                Link(Relation.HASHTAG, LinkTarget.Tag(ValueType.HASHTAG, "italian"), "t"),
+                Link(Relation.LOCATION, LinkTarget.Tag(ValueType.GEOHASH, "u4pr"), "g"),
             ),
             event.links(),
         )

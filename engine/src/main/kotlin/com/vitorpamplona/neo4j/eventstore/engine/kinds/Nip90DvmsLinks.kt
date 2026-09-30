@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkBuilder
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.quartz.nip01Core.core.TagArray
 import com.vitorpamplona.quartz.nip01Core.tags.events.ETag
@@ -142,7 +143,7 @@ private fun LinkBuilder.nip90Inputs(tags: TagArray) =
         when (it.type) {
             Nip90InputType.EVENT -> event(Relation.INPUT, it.value, InputTag.TAG_NAME)
             Nip90InputType.JOB -> event(Relation.INPUT_JOB, it.value, InputTag.TAG_NAME)
-            Nip90InputType.URL -> tag(Relation.TAG, InputTag.TAG_NAME, it.value)
+            Nip90InputType.URL -> value(Relation.INPUT, ValueType.URL, it.value, InputTag.TAG_NAME)
         }
     }
 

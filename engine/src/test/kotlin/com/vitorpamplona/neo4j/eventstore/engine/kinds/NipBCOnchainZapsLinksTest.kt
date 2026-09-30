@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.ZapProps
 import com.vitorpamplona.quartz.nipBCOnchainZaps.zap.OnchainZapEvent
 import kotlin.test.Test
@@ -61,8 +62,8 @@ class NipBCOnchainZapsLinksTest {
                 Link(Relation.ZAP_RECIPIENT, LinkTarget.User(recipient), "p", msats),
                 Link(Relation.ZAPPED, LinkTarget.Event(zapped), "e", msats),
                 Link(Relation.ZAPPED, LinkTarget.Address(article), "a", msats),
-                Link(Relation.TAG, LinkTarget.Tag("i", tx), "i"),
-                Link(Relation.TAG, LinkTarget.Tag("k", "30023"), "k"),
+                Link(Relation.TRANSACTION, LinkTarget.Tag(ValueType.BITCOIN_TX, tx), "i"),
+                Link(Relation.ZAPPED_KIND, LinkTarget.Tag(ValueType.KIND, "30023"), "k"),
             ),
             event.links(),
         )

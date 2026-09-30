@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.quartz.nip66RelayMonitor.discovery.RelayDiscoveryEvent
 import com.vitorpamplona.quartz.nip66RelayMonitor.monitor.RelayMonitorEvent
 import kotlin.test.Test
@@ -44,7 +45,7 @@ class Nip66RelayMonitorLinksTest {
                 "",
                 sig,
             )
-        assertEquals(listOf(Link(Relation.TAG, LinkTarget.Tag("g", "u4pr"), "g")), event.links())
+        assertEquals(listOf(Link(Relation.LOCATION, LinkTarget.Tag(ValueType.GEOHASH, "u4pr"), "g")), event.links())
     }
 
     @Test
@@ -68,9 +69,9 @@ class Nip66RelayMonitorLinksTest {
             )
         assertEquals(
             listOf(
-                Link(Relation.HASHTAG, LinkTarget.Tag("t", "bitcoin"), "t"),
-                Link(Relation.TAG, LinkTarget.Tag("g", "u4pr"), "g"),
-                Link(Relation.TAG, LinkTarget.Tag("k", "1"), "k"),
+                Link(Relation.HASHTAG, LinkTarget.Tag(ValueType.HASHTAG, "bitcoin"), "t"),
+                Link(Relation.LOCATION, LinkTarget.Tag(ValueType.GEOHASH, "u4pr"), "g"),
+                Link(Relation.SUPPORTED_KIND, LinkTarget.Tag(ValueType.KIND, "1"), "k"),
             ),
             event.links(),
         )
@@ -87,6 +88,6 @@ class Nip66RelayMonitorLinksTest {
                 "",
                 sig,
             )
-        assertEquals(listOf(Link(Relation.TAG, LinkTarget.Tag("k", "1"), "k")), event.links())
+        assertEquals(listOf(Link(Relation.SUPPORTED_KIND, LinkTarget.Tag(ValueType.KIND, "1"), "k")), event.links())
     }
 }

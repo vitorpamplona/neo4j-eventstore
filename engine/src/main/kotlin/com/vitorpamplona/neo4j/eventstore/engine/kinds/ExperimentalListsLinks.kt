@@ -22,6 +22,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkBuilder
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.ItemProps
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.MemberProps
@@ -121,13 +122,13 @@ internal fun KindMappers.Builder.experimentalLists() {
     // Members are NIP-73 external ids (`i`).
     on<ExternalIdTrustedListEvent> { e ->
         each(e.tags, ExternalIdMemberTag::parse) {
-            tag(Relation.MEMBER, ExternalIdMemberTag.TAG_NAME, it.externalId, ExternalIdMemberTag.TAG_NAME, it.memberProps())
+            external(Relation.MEMBER, it.externalId, ExternalIdMemberTag.TAG_NAME, it.memberProps())
         }
         experimentalTrustedListLinks(e, ExternalIdMemberTag.TAG_NAME)
     }
 
     // The whole file's url (`r`). Hashes (`x`, `b`) and servers are values, not links.
-    on<BlossomPieceIndexEvent> { e -> tag(Relation.TAG, ReferenceTag.TAG_NAME, e.url()) }
+    on<BlossomPieceIndexEvent> { e -> value(Relation.REFERENCE, ValueType.URL, e.url(), ReferenceTag.TAG_NAME) }
 
     // What is on the shelf, `a` and `e` entries alike (`items`).
     on<BookshelfDirectoryEvent> { e ->
@@ -181,7 +182,7 @@ internal fun KindMappers.Builder.experimentalLists() {
             if (link.eventId != null) {
                 event(Relation.WIKILINK, link.eventId, WikilinkTag.TAG_NAME)
             } else {
-                tag(Relation.WIKILINK, WikilinkTag.TAG_NAME, link.target)
+                value(Relation.WIKILINK, ValueType.WIKI, link.target, WikilinkTag.TAG_NAME)
             }
             user(Relation.WIKILINK_AUTHOR, link.pubKey, WikilinkTag.TAG_NAME)
         }
@@ -218,14 +219,14 @@ private fun LinkBuilder.experimentalListItemLinks(
         when (parent) {
             is ParentList.EventId -> event(Relation.PARENT_LIST, parent.eventId, ParentListTag.TAG_NAME)
             is ParentList.Coordinate -> address(Relation.PARENT_LIST, parent.address, ParentListTag.TAG_NAME)
-            is ParentList.Name -> tag(Relation.PARENT_LIST, ParentListTag.TAG_NAME, parent.name)
+            is ParentList.Name -> value(Relation.PARENT_LIST, ValueType.LIST, parent.name, ParentListTag.TAG_NAME)
         }
     }
     each(tags, PTag::parse) { user(Relation.ITEM, it, PTag.TAG_NAME, itemProps) }
     each(tags, ETag::parse) { event(Relation.ITEM, it, ETag.TAG_NAME, itemProps) }
     each(tags, ATag::parse) { address(Relation.ITEM, it, ATag.TAG_NAME, itemProps) }
     // HashtagTag::parse keeps the case, which a list value needs; hashtags() would lowercase it.
-    each(tags, HashtagTag::parse) { tag(Relation.ITEM, HashtagTag.TAG_NAME, it, HashtagTag.TAG_NAME, itemProps) }
+    each(tags, HashtagTag::parse) { value(Relation.ITEM, ValueType.HASHTAG, it, HashtagTag.TAG_NAME, itemProps) }
 }
 
 /**

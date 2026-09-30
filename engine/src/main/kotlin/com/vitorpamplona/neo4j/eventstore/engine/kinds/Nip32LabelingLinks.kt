@@ -22,6 +22,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkBuilder
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.LabelProps
 import com.vitorpamplona.quartz.nip01Core.core.TagArray
@@ -36,15 +37,17 @@ import com.vitorpamplona.quartz.nip32Labeling.tags.LabelTag
 internal fun KindMappers.Builder.nip32Labeling() {
     // NIP-32: every `e`/`a`/`p`/`t`/`r` is a label TARGET (`LABELED`), so a 1985's `t` and `r` are
     // never its own topics. Each target carries the labels in `labels`: one `<namespace>:<label>`
-    // per `l` tag (`ugc` when unmarked, `nip32Qualified`). The `l`/`L` values are `TAG`s. With no
+    // per `l` tag (`ugc` when unmarked, `nip32Qualified`). The `l`/`L` values are `LABEL`s and `LABEL_NAMESPACE`s. With no
     // target tag the labels apply to the label event itself, which is no link.
     //
-    // Three walks, not eight: the `l` tags are parsed once for both their `TAG`s and the props,
+    // Three walks, not eight: the `l` tags are parsed once for both their `LABEL`s and the props,
     // and the five target kinds in one pass (`Nip32LabelTargetTag`), in tag order.
     on<LabelEvent> { e ->
-        each(e.tags, LabelNamespaceTag::parse) { tag(Relation.TAG, LabelNamespaceTag.TAG_NAME, it.namespace) }
+        each(e.tags, LabelNamespaceTag::parse) {
+            value(Relation.LABEL_NAMESPACE, ValueType.LABEL_NAMESPACE, it.namespace, LabelNamespaceTag.TAG_NAME)
+        }
         val labels = e.labels()
-        labels.forEach { tag(Relation.TAG, LabelTag.TAG_NAME, it.label) }
+        labels.forEach { value(Relation.LABEL, ValueType.LABEL, it.label, LabelTag.TAG_NAME) }
 
         val props = LabelProps(labels.map { it.nip32Qualified() })
         each(e.tags, Nip32LabelTargetTag::parse) {
@@ -52,7 +55,7 @@ internal fun KindMappers.Builder.nip32Labeling() {
                 is Nip32LabelTarget.OfEvent -> event(Relation.LABELED, it.tag, ETag.TAG_NAME, props)
                 is Nip32LabelTarget.OfUser -> user(Relation.LABELED, it.tag, PTag.TAG_NAME, props)
                 is Nip32LabelTarget.OfAddress -> address(Relation.LABELED, it.tag, ATag.TAG_NAME, props)
-                is Nip32LabelTarget.OfTag -> tag(Relation.LABELED, it.name, it.value, props = props)
+                is Nip32LabelTarget.OfTag -> value(Relation.LABELED, it.type, it.value, it.name, props)
             }
         }
     }
@@ -60,9 +63,11 @@ internal fun KindMappers.Builder.nip32Labeling() {
 
 /**
  * The NIP-32 `L` namespaces ([LabelNamespaceTag]) and `l` labels ([LabelTag]) an event carries,
- * each a `TAG` by its value. A 1985 labels its targets with them; a 1984 report classifies itself.
+ * each a `LABEL_NAMESPACE` / `LABEL` by its value. A 1985 labels its targets with them; a 1984 report classifies itself.
  */
 internal fun LinkBuilder.nip32LabelTags(tags: TagArray) {
-    each(tags, LabelNamespaceTag::parse) { tag(Relation.TAG, LabelNamespaceTag.TAG_NAME, it.namespace) }
-    each(tags, LabelTag::parse) { tag(Relation.TAG, LabelTag.TAG_NAME, it.label) }
+    each(tags, LabelNamespaceTag::parse) {
+        value(Relation.LABEL_NAMESPACE, ValueType.LABEL_NAMESPACE, it.namespace, LabelNamespaceTag.TAG_NAME)
+    }
+    each(tags, LabelTag::parse) { value(Relation.LABEL, ValueType.LABEL, it.label, LabelTag.TAG_NAME) }
 }

@@ -184,7 +184,7 @@ class ReferenceQueriesIT {
             val t11 =
                 rows(
                     cypher,
-                    "MATCH (:Tag {key: 't:bitcoin'})<-[:HASHTAG]-(n:Data)-[:HASHTAG]->(o:Tag) WHERE o.key <> 't:bitcoin' RETURN o.value AS tag ORDER BY tag",
+                    "MATCH (:Tag {key: 'hashtag:bitcoin'})<-[:HASHTAG]-(n:Data)-[:HASHTAG]->(o:Tag) WHERE o.key <> 'hashtag:bitcoin' RETURN o.value AS tag ORDER BY tag",
                 )
             assertEquals(listOf("art", "nostr"), t11.map { it.jsonArray[0].jsonPrimitive.content })
 

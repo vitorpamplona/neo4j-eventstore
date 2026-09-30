@@ -21,6 +21,7 @@
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.quartz.nipC0CodeSnippets.CodeSnippetEvent
 import com.vitorpamplona.quartz.nipC0CodeSnippets.tags.LanguageTag
@@ -31,6 +32,6 @@ internal fun KindMappers.Builder.nipC0CodeSnippets() {
     // NIP-C0: `repo` is a URL (not modelled) or a NIP-34 repository's address; `l` is the language.
     on<CodeSnippetEvent> { e ->
         each(e.tags, RepoTag::parse) { address(Relation.REPOSITORY, it, RepoTag.TAG_NAME) }
-        each(e.tags, LanguageTag::parse) { tag(Relation.TAG, LanguageTag.TAG_NAME, it) }
+        each(e.tags, LanguageTag::parse) { value(Relation.LANGUAGE, ValueType.LANGUAGE, it, LanguageTag.TAG_NAME) }
     }
 }

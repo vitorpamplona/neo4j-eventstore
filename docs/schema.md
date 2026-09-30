@@ -31,7 +31,7 @@ the [link vocabulary](vocabulary.md).
 | `:Event` (without `:Data`) | `id` | — | A **stub**: an id something references that the relay does not hold. Filter with `NOT n:Data` (e.g. "most-cited missing events"). |
 | `:User` | `pubkey` (64-hex) | — | Anyone who authored or was referenced. Names live on their kind 0 (below). |
 | `:Address` | `id` = `kind:pubkey:d` | `kind`, `pubkey`, `d` | Every replaceable (`3:<pk>:`, `10002:<pk>:`) and addressable (`30023:<pk>:<d>`) event's own address, plus any address something references. Kinds are 0–65535. A `d` longer than 1024 UTF-8 bytes appears as `sha256:<hex of the d>` (the key must stay indexable); it is still one node per distinct `d`. |
-| `:Tag` | `key` = `name:value` | `name`, `value` | A value a kind links that is not an event, user or address: a hashtag (`t:nostr`), a URL (`r:https://…`), an external id (`i:isbn:…`), a group (`h:<id>`), a kind (`k:1`). `name` is the tag it was written in. Values of 256 bytes or less. |
+| `:Tag` | `key` = `type:value` | `type`, `value` | A value a kind links that is not an event, user or address, keyed by what it IS: a hashtag (`hashtag:nostr`), a URL (`url:https://…`), a place (`geohash:u4pr`), a kind (`kind:1`), an external id (`external:isbn:…`), a group (`group:<id>`). Never by the tag letter that carried it, so an `r` URL and a NIP-73 `i` URL are one node. Every type is in the [catalog](relations.md#value-types). Values of 256 bytes or less. |
 
 **An `:Event` node is the id; `:Data` marks that its event is held.** A reference to an id
 points at the `:Event`, which exists whether or not the event is held (a stub), as an `:Address`
@@ -89,7 +89,8 @@ and `GET /graph/schema` lists them. The ones most queries start from:
 | `LABELED` | Event → … | NIP-32 |
 | `SUBJECT` | Event → User / Event / Address / Tag | A NIP-85 assertion's subject (its `d`), with the scores |
 | `SERVICE_PROVIDER` | Event → User | A 10040's trust services (`via` names the metric, e.g. `30382:rank`); a NIP-90 request's DVMs |
-| `HASHTAG`, `TAG` | Event → Tag | A `t` (lowercased), and the other value tags a kind opts into (`i`, `k`, `r`, `g`, …) |
+| `HASHTAG`, `LOCATION`, `REFERENCE`, `LANGUAGE`, `LABEL`, … | Event → Tag | A value's role: a topic, a place, a referenced URL, a language, a NIP-32 label. There is no generic "tag" relation |
+| `ROOT_KIND`, `REACTED_KIND`, `ZAPPED_KIND`, … | Event → Tag (`kind:`) | The kind of the target the event's `X` relation points at, as the event states it (`k` / `K`) |
 | `GROUP`, `COMMUNITY` | Event → Tag; → Address | A NIP-29 / Marmot / Buzz group (its `h`); a NIP-72 community |
 | `CLIENT`, `ZAP_SPLIT`, `EMOJI_SET` | Event → Address; → User; → Address | Tags any event may carry: NIP-89 `client`, NIP-57 zap splits, a NIP-30 emoji's set |
 
@@ -252,8 +253,8 @@ WHERE NOT missing:Data
 RETURN missing.id, count(*) AS citations ORDER BY citations DESC LIMIT 50;
 
 // T11 — hashtags used alongside #bitcoin in the last day
-MATCH (:Tag {key: 't:bitcoin'})<-[:HASHTAG]-(n:Data)-[:HASHTAG]->(o:Tag)
-WHERE n.created_at >= $since AND o.key <> 't:bitcoin'
+MATCH (:Tag {key: 'hashtag:bitcoin'})<-[:HASHTAG]-(n:Data)-[:HASHTAG]->(o:Tag)
+WHERE n.created_at >= $since AND o.key <> 'hashtag:bitcoin'
 RETURN o.value, count(*) AS uses ORDER BY uses DESC LIMIT 20;
 
 // T12 — who reported X as a PERSON (not one of X's notes), among the people I follow
@@ -381,8 +382,9 @@ RETURN mod, count(DISTINCT approval) AS approvals, count(DISTINCT post) AS posts
 ORDER BY approvals DESC;
 
 // S12 — What Nostr says about a book, a URL or a podcast (NIP-73 external ids): NIP-22 comments
-// scope it as ROOT / PARENT, other kinds tag or mention it — one `:Tag` node joins them all.
-MATCH (subject:Tag {key: 'i:' + $externalId})<-[r:ROOT|PARENT|REACTED|MENTION|TAG]-(e:Data)-[:AUTHOR]->(who:User)
+// scope it as ROOT / PARENT, other kinds react to or mention it — one `:Tag` node joins them all.
+// (A URL is `url:` + the URL, whether an `r` or an `i` named it.)
+MATCH (subject:Tag {key: 'external:' + $externalId})<-[r:ROOT|PARENT|REACTED|MENTION]-(e:Data)-[:AUTHOR]->(who:User)
 RETURN type(r) AS relation, e.kind AS kind, count(e) AS events, count(DISTINCT who) AS people
 ORDER BY events DESC;
 
@@ -429,6 +431,15 @@ RETURN n.id AS id,
   COUNT { (n)<-[:ROOT]-() } AS threadSize,
   COUNT { (n)<-[:ZAPPED]-() } AS zaps
 ORDER BY reactions + 2 * reposts + 3 * quotes + 2 * directReplies + 5 * zaps DESC;
+
+// S18 — A claim checked against the fact. Every link is what its event SAYS: `REACTED_AUTHOR` is
+// the author a reaction names in its `p`, not a verified signer. Where the note is held, its real
+// signer is one hop further; these are the reactions that tag someone else.
+MATCH (r:Data {kind: 7})-[:REACTED]->(n:Data)-[:AUTHOR]->(signer:User)
+MATCH (r)-[:REACTED_AUTHOR]->(claimed:User)
+WHERE claimed <> signer
+RETURN n.id AS note, signer.pubkey AS author, claimed.pubkey AS tagged, count(r) AS reactions
+ORDER BY reactions DESC;
 ```
 
 ## What the endpoint refuses

@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.quartz.marmot.mip00KeyPackages.KeyPackageEvent
 import com.vitorpamplona.quartz.marmot.mip02Welcome.WelcomeEvent
 import com.vitorpamplona.quartz.marmot.mip03GroupMessages.GroupEvent
@@ -47,7 +48,7 @@ class MarmotLinksTest {
         assertEquals(
             listOf(
                 Link(Relation.KEY_PACKAGE, LinkTarget.Event(keyPackage), "e"),
-                Link(Relation.GROUP, LinkTarget.Tag("h", group), "h"),
+                Link(Relation.GROUP, LinkTarget.Tag(ValueType.GROUP, group), "h"),
             ),
             WelcomeEvent(me, me, 0, tags, "", "").links(),
         )
@@ -56,7 +57,7 @@ class MarmotLinksTest {
     @Test
     fun groupMessageLinksOnlyItsGroup() {
         assertEquals(
-            listOf(Link(Relation.GROUP, LinkTarget.Tag("h", group), "h")),
+            listOf(Link(Relation.GROUP, LinkTarget.Tag(ValueType.GROUP, group), "h")),
             GroupEvent(me, me, 0, arrayOf(arrayOf("h", group)), "c2VjcmV0", me).links(),
         )
     }
@@ -65,7 +66,7 @@ class MarmotLinksTest {
     fun keyPackageLinksItsRef() {
         val tags = arrayOf(arrayOf("d", "slot"), arrayOf("i", "0a1b"), arrayOf("mls_ciphersuite", "0x0001"))
         assertEquals(
-            listOf(Link(Relation.TAG, LinkTarget.Tag("i", "0a1b"), "i")),
+            listOf(Link(Relation.KEY_PACKAGE_REF, LinkTarget.Tag(ValueType.KEY_PACKAGE_REF, "0a1b"), "i")),
             KeyPackageEvent(me, me, 0, tags, "", me).links(),
         )
     }

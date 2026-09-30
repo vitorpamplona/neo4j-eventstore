@@ -24,6 +24,7 @@ import com.vitorpamplona.neo4j.eventstore.engine.derive.Extractors
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.ZapProps
 import com.vitorpamplona.quartz.nip57Zaps.PrivateZapEvent
 import com.vitorpamplona.quartz.nip57Zaps.ZapReceiptEvent
@@ -72,7 +73,7 @@ class Nip57ZapsLinksTest {
                 Link(Relation.ZAP_RECIPIENT, LinkTarget.User(recipient), "p", msats),
                 Link(Relation.ZAPPED, LinkTarget.Event(zapped), "e", msats),
                 Link(Relation.ZAPPED, LinkTarget.Address(address), "a", msats),
-                Link(Relation.TAG, LinkTarget.Tag("k", "30023"), "k"),
+                Link(Relation.ZAPPED_KIND, LinkTarget.Tag(ValueType.KIND, "30023"), "k"),
             ),
             event.links(),
         )
@@ -102,7 +103,7 @@ class Nip57ZapsLinksTest {
                 Link(Relation.ZAP_RECIPIENT, LinkTarget.User(recipient), "p", msats),
                 Link(Relation.ZAP_SENDER, LinkTarget.User(sender), "P"),
                 Link(Relation.ZAPPED, LinkTarget.Event(zapped), "e", msats),
-                Link(Relation.TAG, LinkTarget.Tag("k", "1"), "k"),
+                Link(Relation.ZAPPED_KIND, LinkTarget.Tag(ValueType.KIND, "1"), "k"),
             ),
             event.links(),
         )

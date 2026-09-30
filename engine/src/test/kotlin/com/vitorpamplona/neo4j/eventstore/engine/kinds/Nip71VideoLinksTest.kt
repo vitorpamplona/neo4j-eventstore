@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.CreditProps
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.ParticipantProps
 import com.vitorpamplona.quartz.nip19Bech32.entities.NEvent
@@ -73,7 +74,7 @@ class Nip71VideoLinksTest {
                 Link(Relation.MENTION, LinkTarget.Event(cited), "e"),
                 Link(Relation.TEXT_TRACK, LinkTarget.Address(subtitles), "text-track"),
                 Link(Relation.TEXT_TRACK, LinkTarget.Event(track), "text-track"),
-                Link(Relation.HASHTAG, LinkTarget.Tag("t", "fun"), "t"),
+                Link(Relation.HASHTAG, LinkTarget.Tag(ValueType.HASHTAG, "fun"), "t"),
             )
         assertEquals(expected, VideoNormalEvent(id, author, 1, tags, "", sig).links())
         assertEquals(expected, AddressableShortVideoEvent(id, author, 1, arrayOf(arrayOf("d", "clip")) + tags, "", sig).links())
@@ -114,7 +115,7 @@ class Nip71VideoLinksTest {
         assertEquals(
             listOf(
                 Link(Relation.VIDEO, LinkTarget.Address(video), "a"),
-                Link(Relation.TAG, LinkTarget.Tag("l", "en"), "l"),
+                Link(Relation.LANGUAGE, LinkTarget.Tag(ValueType.LANGUAGE, "en"), "l"),
             ),
             event.links(),
         )

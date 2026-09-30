@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.PlatformProps
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.ReleaseProps
 import com.vitorpamplona.quartz.nip89AppHandlers.definition.AppDefinitionEvent
@@ -90,11 +91,11 @@ class Nip89AppHandlersLinksTest {
             )
         assertEquals(
             listOf(
-                Link(Relation.TAG, LinkTarget.Tag("k", "1"), "k"),
+                Link(Relation.SUPPORTED_KIND, LinkTarget.Tag(ValueType.KIND, "1"), "k"),
                 Link(Relation.SITE_MANIFEST, LinkTarget.Address(latest), "latest", ReleaseProps(release = "latest")),
                 Link(Relation.SITE_MANIFEST, LinkTarget.Address(next), "next", ReleaseProps(release = "next")),
                 Link(Relation.SITE_MANIFEST, LinkTarget.Address(repo), "a"),
-                Link(Relation.HASHTAG, LinkTarget.Tag("t", "social"), "t"),
+                Link(Relation.HASHTAG, LinkTarget.Tag(ValueType.HASHTAG, "social"), "t"),
             ),
             event.links(),
         )

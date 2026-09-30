@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.quartz.nipXXPodcasting20.episode.Podcasting20EpisodeEvent
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -47,7 +48,7 @@ class NipXXPodcasting20LinksTest {
         assertEquals(
             listOf(
                 Link(Relation.EDITED, LinkTarget.Event(original), "edit"),
-                Link(Relation.HASHTAG, LinkTarget.Tag("t", "tech"), "t"),
+                Link(Relation.HASHTAG, LinkTarget.Tag(ValueType.HASHTAG, "tech"), "t"),
             ),
             event.links(),
         )

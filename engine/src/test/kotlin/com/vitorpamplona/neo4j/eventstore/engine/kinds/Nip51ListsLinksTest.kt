@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.LinkProps
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.MuteProps
 import com.vitorpamplona.quartz.nip01Core.core.TagArray
@@ -86,10 +87,10 @@ class Nip51ListsLinksTest {
 
     private fun <P : LinkProps> tg(
         relation: Relation<P>,
-        name: String,
+        type: ValueType,
         value: String,
-        via: String = name,
-    ) = Link(relation, LinkTarget.Tag(name, value), via)
+        via: String,
+    ) = Link(relation, LinkTarget.Tag(type, value), via)
 
     private val bookmarkTags: TagArray =
         arrayOf(
@@ -125,8 +126,8 @@ class Nip51ListsLinksTest {
         assertEquals(
             listOf(
                 us(Relation.MUTE, alice),
-                tg(Relation.MUTE, "t", "politics"),
-                tg(Relation.MUTE, "word", "gm"),
+                tg(Relation.MUTE, ValueType.HASHTAG, "politics", "t"),
+                tg(Relation.MUTE, ValueType.WORD, "gm", "word"),
                 ev(Relation.MUTE, note),
             ),
             event.links(),
@@ -139,7 +140,7 @@ class Nip51ListsLinksTest {
         assertEquals(listOf(us(Relation.MEMBER, alice), us(Relation.MEMBER, bob)), set.links())
 
         val mute = FollowSetEvent(id, me, 1L, arrayOf(arrayOf("d", "mute"), arrayOf("p", alice), arrayOf("word", "spam")), encrypted, sig)
-        assertEquals(listOf(us(Relation.MUTE, alice), tg(Relation.MUTE, "word", "spam")), mute.links())
+        assertEquals(listOf(us(Relation.MUTE, alice), tg(Relation.MUTE, ValueType.WORD, "spam", "word")), mute.links())
     }
 
     @Test
@@ -206,7 +207,7 @@ class Nip51ListsLinksTest {
             )
         assertEquals(
             listOf(
-                tg(Relation.TAG, "i", "com.example.app"),
+                tg(Relation.APP, ValueType.APP, "com.example.app", "i"),
                 ev(Relation.CURATED, note),
                 ad(Relation.APP, app),
             ),
@@ -256,7 +257,7 @@ class Nip51ListsLinksTest {
             GitRepositoryListEvent(id, me, 1L, arrayOf(arrayOf("a", repo)), encrypted, sig).links(),
         )
         assertEquals(
-            listOf(tg(Relation.SUBSCRIBED, "g", "u4pruy")),
+            listOf(tg(Relation.SUBSCRIBED, ValueType.GEOHASH, "u4pruy", "g")),
             GeohashListEvent(id, me, 1L, arrayOf(arrayOf("g", "u4pruy")), encrypted, sig).links(),
         )
     }
@@ -280,8 +281,8 @@ class Nip51ListsLinksTest {
             )
         assertEquals(
             listOf(
-                tg(Relation.SUBSCRIBED, "t", "nostr"),
-                tg(Relation.SUBSCRIBED, "t", "zaps"),
+                tg(Relation.SUBSCRIBED, ValueType.HASHTAG, "nostr", "t"),
+                tg(Relation.SUBSCRIBED, ValueType.HASHTAG, "zaps", "t"),
                 ad(Relation.SUBSCRIBED, interestSet),
             ),
             list.links(),
@@ -296,7 +297,10 @@ class Nip51ListsLinksTest {
                 encrypted,
                 sig,
             )
-        assertEquals(listOf(tg(Relation.MEMBER, "t", "bitcoin"), tg(Relation.MEMBER, "t", "lightning")), set.links())
+        assertEquals(
+            listOf(tg(Relation.MEMBER, ValueType.HASHTAG, "bitcoin", "t"), tg(Relation.MEMBER, ValueType.HASHTAG, "lightning", "t")),
+            set.links(),
+        )
     }
 
     @Test
@@ -319,7 +323,7 @@ class Nip51ListsLinksTest {
                 sig,
             )
         assertEquals(
-            listOf(us(Relation.MEMBER, alice), us(Relation.MEMBER, bob), tg(Relation.HASHTAG, "t", "dev")),
+            listOf(us(Relation.MEMBER, alice), us(Relation.MEMBER, bob), tg(Relation.HASHTAG, ValueType.HASHTAG, "dev", "t")),
             pack.links(),
         )
 
@@ -343,6 +347,6 @@ class Nip51ListsLinksTest {
                 encrypted,
                 sig,
             )
-        assertEquals(listOf(tg(Relation.SUBSCRIBED, "h", "pizza-lovers", "group")), event.links())
+        assertEquals(listOf(tg(Relation.SUBSCRIBED, ValueType.GROUP, "pizza-lovers", "group")), event.links())
     }
 }

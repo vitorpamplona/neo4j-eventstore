@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.RoleProps
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.WotProps
 import com.vitorpamplona.quartz.nip72ModCommunities.approval.CommunityPostApprovalEvent
@@ -67,7 +68,7 @@ class Nip72ModCommunitiesLinksTest {
                 Link(Relation.APPROVED, LinkTarget.Event(post), "e"),
                 Link(Relation.APPROVED, LinkTarget.Address("30023:$member:post"), "a"),
                 Link(Relation.APPROVED_AUTHOR, LinkTarget.User(member), "p"),
-                Link(Relation.TAG, LinkTarget.Tag("k", "1"), "k"),
+                Link(Relation.APPROVED_KIND, LinkTarget.Tag(ValueType.KIND, "1"), "k"),
             ),
             event.links(),
         )
@@ -141,7 +142,7 @@ class Nip72ModCommunitiesLinksTest {
         assertEquals(
             listOf(
                 Link(Relation.COMMUNITY, LinkTarget.Address(community), "a"),
-                Link(Relation.TAG, LinkTarget.Tag("k", "1"), "k"),
+                Link(Relation.ALLOWED_KIND, LinkTarget.Tag(ValueType.KIND, "1"), "k"),
                 Link(Relation.ALLOWED, LinkTarget.User(member), "p", RoleProps(listOf("contributor"))),
                 Link(Relation.DENIED, LinkTarget.User(moderator), "p"),
                 Link(Relation.WOT_ROOT, LinkTarget.User(owner), "wot", WotProps(2)),

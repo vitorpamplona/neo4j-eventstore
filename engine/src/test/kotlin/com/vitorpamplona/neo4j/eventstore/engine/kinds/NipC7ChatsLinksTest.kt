@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.quartz.nip19Bech32.toNpub
 import com.vitorpamplona.quartz.nipC7Chats.ChatEvent
 import com.vitorpamplona.quartz.utils.Hex
@@ -64,7 +65,7 @@ class NipC7ChatsLinksTest {
                 Link(Relation.PARENT, LinkTarget.Event(parent), "q"),
                 Link(Relation.PARENT_AUTHOR, LinkTarget.User(parentAuthor), "q"),
                 Link(Relation.MENTION, LinkTarget.User(mentioned), "p"),
-                Link(Relation.GROUP, LinkTarget.Tag("h", "group"), "h"),
+                Link(Relation.GROUP, LinkTarget.Tag(ValueType.GROUP, "group"), "h"),
                 Link(Relation.MENTION, LinkTarget.User(cited), Link.VIA_CONTENT),
             ),
             event.links(),

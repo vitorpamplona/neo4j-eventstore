@@ -22,6 +22,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkBuilder
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.quartz.nip01Core.core.TagArray
 import com.vitorpamplona.quartz.nip01Core.tags.aTag.ATag
@@ -57,5 +58,5 @@ private fun LinkBuilder.nip18RepostLinks(tags: TagArray) {
     each(tags, ETag::parseId) { if (it != reposted) event(Relation.MENTION, it, ETag.TAG_NAME) }
     each(tags, ATag::parseAddress) { if (it != repostedAddress) address(Relation.MENTION, it, ATag.TAG_NAME) }
     each(tags, PTag::parseKey) { if (it != author) user(Relation.MENTION, it, PTag.TAG_NAME) }
-    each(tags, KindTag::parse) { tag(Relation.TAG, KindTag.TAG_NAME, it.toString()) }
+    each(tags, KindTag::parse) { value(Relation.REPOSTED_KIND, ValueType.KIND, it.toString(), KindTag.TAG_NAME) }
 }

@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.quartz.contextvm.cep06Announcements.CvmToolsListEvent
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -40,8 +41,8 @@ class ContextvmLinksTest {
             )
         assertEquals(
             listOf(
-                Link(Relation.TAG, LinkTarget.Tag("i", "schemahash1"), "i"),
-                Link(Relation.TAG, LinkTarget.Tag("k", "io.contextvm/common-schema"), "k"),
+                Link(Relation.SCHEMA, LinkTarget.Tag(ValueType.SCHEMA_HASH, "schemahash1"), "i"),
+                Link(Relation.SCHEMA_NAMESPACE, LinkTarget.Tag(ValueType.SCHEMA_NAMESPACE, "io.contextvm/common-schema"), "k"),
             ),
             CvmToolsListEvent(me, me, 0, tags, "{\"tools\":[]}", me).links(),
         )

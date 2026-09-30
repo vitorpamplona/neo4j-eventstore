@@ -22,6 +22,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkBuilder
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.quartz.nip01Core.core.HexKey
 import com.vitorpamplona.quartz.nip01Core.tags.people.PTag
@@ -35,11 +36,11 @@ internal fun KindMappers.Builder.nip35Torrents() {
     // NIP-35: `i` holds external catalogue ids (imdb, tmdb, newznab…) and `t` categories. Quartz's
     // builder turns the description's `nostr:` references into `q` and `p` tags and its URLs into `r`.
     on<TorrentEvent> { e ->
-        each(e.tags, Nip35ExternalIdTag::parse) { tag(Relation.TAG, Nip35ExternalIdTag.TAG_NAME, it) }
+        each(e.tags, Nip35ExternalIdTag::parse) { external(Relation.ABOUT, it, Nip35ExternalIdTag.TAG_NAME) }
         hashtags(e.tags)
         quotes(e.tags)
         each(e.tags, PTag::parse) { user(Relation.MENTION, it, PTag.TAG_NAME) }
-        each(e.tags, ReferenceTag::parse) { tag(Relation.TAG, ReferenceTag.TAG_NAME, it) }
+        each(e.tags, ReferenceTag::parse) { value(Relation.REFERENCE, ValueType.URL, it, ReferenceTag.TAG_NAME) }
     }
 
     // NIP-35: a comment "works exactly like a kind 1": a NIP-10 thread rooted at the torrent. A `p` is the parent's author when it matches the parent `e` tag's author slot.

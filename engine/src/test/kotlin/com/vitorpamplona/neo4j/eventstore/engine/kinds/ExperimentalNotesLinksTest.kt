@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.RatingProps
 import com.vitorpamplona.quartz.experimental.nipsOnNostr.NipTextEvent
 import com.vitorpamplona.quartz.experimental.ratings.EntityRatingEvent
@@ -122,7 +123,7 @@ class ExperimentalNotesLinksTest {
                 Link(Relation.MENTION, LinkTarget.Address(article), "a"),
                 Link(Relation.QUOTE, LinkTarget.Event(note3), "q"),
                 Link(Relation.MENTION, LinkTarget.User(alice), "p"),
-                Link(Relation.TAG, LinkTarget.Tag("k", "1"), "k"),
+                Link(Relation.DEFINED_KIND, LinkTarget.Tag(ValueType.KIND, "1"), "k"),
                 Link(Relation.MENTION, LinkTarget.User(bob), Link.VIA_CONTENT),
             ),
             NipTextEvent(me, me, 0, tags, "# NIP-01\n\nThanks nostr:$npub", me).links(),
@@ -148,7 +149,7 @@ class ExperimentalNotesLinksTest {
             listOf(
                 Link(Relation.RATED, LinkTarget.Address(book), "a", props),
                 Link(Relation.RATED, LinkTarget.Event(note1), "e", props),
-                Link(Relation.TAG, LinkTarget.Tag("k", "30040"), "k"),
+                Link(Relation.RATED_KIND, LinkTarget.Tag(ValueType.KIND, "30040"), "k"),
                 Link(Relation.RATED_AUTHOR, LinkTarget.User(alice), "p", props),
             ),
             EntityRatingEvent(me, me, 0, tags, "Great read", me).links(),
@@ -158,7 +159,7 @@ class ExperimentalNotesLinksTest {
     @Test
     fun entityRatingReadsASpecOnlyDByItsMark() {
         assertEquals(
-            listOf(Link(Relation.RATED, LinkTarget.Tag("d", "hashtag:bitcoin"), "d", RatingProps(mark = "hashtag", stars = 5.0))),
+            listOf(Link(Relation.RATED, LinkTarget.Tag(ValueType.HASHTAG, "bitcoin"), "d", RatingProps(mark = "hashtag", stars = 5.0))),
             EntityRatingEvent(
                 me,
                 me,

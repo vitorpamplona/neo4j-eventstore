@@ -111,14 +111,14 @@ class EdgeDeriverTest {
         assertNotNull(doc.edge("MENTION", mentioned), "the npub is a mention")
         assertTrue(doc.edges.none { it.target.key.contains(secretKey) }, "the secret key's hex is never a node")
         assertTrue(doc.edges.none { it.target.key.contains("nsec1") }, "a bech32 private key is never a tag value")
-        assertNotNull(doc.edge("HASHTAG", "t:nostr"))
+        assertNotNull(doc.edge("HASHTAG", "hashtag:nostr"))
     }
 
     @Test
     fun anOverlongTagValueNeverKeysANode() {
         val long = "x".repeat(300)
         val doc = deriver.derive(event(1, ALICE, listOf(listOf("t", long), listOf("t", "ok"))))
-        assertNotNull(doc.edge("HASHTAG", "t:ok"))
+        assertNotNull(doc.edge("HASHTAG", "hashtag:ok"))
         assertTrue(doc.edges.none { it.target.key.contains(long) })
     }
 

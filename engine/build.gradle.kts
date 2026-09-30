@@ -21,6 +21,10 @@ kotlin {
 
 tasks.test {
     useJUnitPlatform()
+    // RelationCatalogTest compares the generated catalog with this file: an edit to it alone
+    // must re-run the test, not hit the cache.
+    inputs.file(rootProject.file("docs/relations.md")).withPropertyName("relationCatalog")
+    environment("UPDATE_DOCS", System.getenv("UPDATE_DOCS") ?: "")
 }
 
 mavenPublishing {

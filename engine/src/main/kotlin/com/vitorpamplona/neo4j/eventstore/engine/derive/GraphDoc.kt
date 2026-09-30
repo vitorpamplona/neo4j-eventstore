@@ -34,7 +34,7 @@ enum class NodeKind(
     TAG(Labels.TAG),
 }
 
-/** A node by its unique key: an event id, a pubkey, an address id (`kind:pubkey:d`), or a tag key (`name:value`). */
+/** A node by its unique key: an event id, a pubkey, an address id (`kind:pubkey:d`), or a value key (`type:value`). */
 data class NodeRef(
     val kind: NodeKind,
     val key: String,

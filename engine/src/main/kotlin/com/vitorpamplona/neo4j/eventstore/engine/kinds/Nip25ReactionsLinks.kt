@@ -21,6 +21,7 @@
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.quartz.nip01Core.tags.aTag.ATag
 import com.vitorpamplona.quartz.nip01Core.tags.events.ETag
@@ -57,13 +58,13 @@ internal fun KindMappers.Builder.nip25Reactions() {
         each(e.tags, ETag::parseId) { if (it != reacted?.eventId) event(Relation.MENTION, it, ETag.TAG_NAME) }
         each(e.tags, ATag::parseAddress) { if (it != reactedAddress) address(Relation.MENTION, it, ATag.TAG_NAME) }
         each(e.tags, PTag::parseKey) { if (it != author) user(Relation.MENTION, it, PTag.TAG_NAME) }
-        each(e.tags, KindTag::parse) { tag(Relation.TAG, KindTag.TAG_NAME, it.toString()) }
+        each(e.tags, KindTag::parse) { value(Relation.REACTED_KIND, ValueType.KIND, it.toString(), KindTag.TAG_NAME) }
     }
 
     // NIP-25 kind 17: every NIP-73 `i` is a `REACTED` external id (a podcast reaction names both
     // the show and the episode), `k` their kinds. The `i`'s URL hint is not a target.
     on<ExternalReactionEvent> { e ->
-        each(e.tags, ExternalTargetTag::parse) { tag(Relation.REACTED, ExternalTargetTag.TAG_NAME, it) }
-        each(e.tags, ReplyKindTag::parse) { tag(Relation.TAG, ReplyKindTag.TAG_NAME, it) }
+        each(e.tags, ExternalTargetTag::parse) { external(Relation.REACTED, it, ExternalTargetTag.TAG_NAME) }
+        each(e.tags, ReplyKindTag::parse) { value(Relation.REACTED_KIND, ValueType.KIND, it, ReplyKindTag.TAG_NAME) }
     }
 }

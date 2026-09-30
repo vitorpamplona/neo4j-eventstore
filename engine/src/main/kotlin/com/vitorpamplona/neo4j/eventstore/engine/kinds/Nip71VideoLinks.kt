@@ -22,6 +22,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkBuilder
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.CreditProps
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.ParticipantProps
@@ -48,7 +49,7 @@ internal fun KindMappers.Builder.nip71Video() {
     // The video this track belongs to and its language (`l`).
     on<TextTrackEvent> { e ->
         each(e.tags, ATag::parse) { address(Relation.VIDEO, it, ATag.TAG_NAME) }
-        each(e.tags, LanguageTag::parse) { tag(Relation.TAG, LanguageTag.TAG_NAME, it) }
+        each(e.tags, LanguageTag::parse) { value(Relation.LANGUAGE, ValueType.LANGUAGE, it, LanguageTag.TAG_NAME) }
     }
 
     // The watched video: its address, and the id of the exact version played. Each carries the

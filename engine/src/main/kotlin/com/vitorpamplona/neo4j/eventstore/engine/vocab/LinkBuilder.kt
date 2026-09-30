@@ -37,31 +37,52 @@ import com.vitorpamplona.quartz.nip01Core.tags.people.PubKeyReferenceTag
  * Every relation takes only its declared props type ([Relation]`<P>`), so a mismatched pairing
  * does not compile. Targets are checked here as the last guard before a value becomes a node:
  * ids and keys are 64-hex, lowercased so one key is one node; addresses are `kind:<64-hex>:d`
- * in their canonical key form ([canonicalAddress]); tag values are non-blank. Props with no
+ * in their canonical key form ([canonicalAddress]); values are non-blank. Props with no
  * value present are dropped, and exact duplicates collapse, keeping the first occurrence's order.
  * A malformed value is dropped, never linked.
+ *
+ * Two rules hold for every link a mapper states, so no mapper can break them:
+ * - `via` is required: where in the event the reference was written (a tag name, or
+ *   [Link.VIA_CONTENT]). Only the envelope's own links (`AUTHOR`, `ADDRESS`) have none.
+ * - the target must be one its relation declares ([Relation.targets]); anything else throws: a
+ *   mapper bug, which the golden tests catch and `KindLinks.of` counts per class in production.
  */
 class LinkBuilder {
     private val links = LinkedHashSet<Link<*>>()
 
     fun <P : LinkProps> add(link: Link<P>) {
+        require(link.target.kind in link.relation.targets) {
+            "${link.relation} does not take a ${link.target.kind.code} target (${link.target})"
+        }
         links.add(link)
+    }
+
+    /** The event's author, from its envelope: the one user link with no `via`. */
+    internal fun envelopeAuthor(pubkey: String?) {
+        val hex = normalizedHex(pubkey) ?: return
+        add(Link(Relation.AUTHOR, LinkTarget.User(hex)))
+    }
+
+    /** The event's own address, from its envelope: the one address link with no `via`. */
+    internal fun envelopeAddress(address: String?) {
+        val value = normalizedAddress(address) ?: return
+        add(Link(Relation.ADDRESS, LinkTarget.Address(value)))
     }
 
     fun <P : LinkProps> event(
         relation: Relation<P>,
         id: String?,
-        via: String? = null,
+        via: String,
         props: P? = null,
     ) {
         val hex = normalizedHex(id) ?: return
-        links.add(Link(relation, LinkTarget.Event(hex), via, props.orNull()))
+        add(Link(relation, LinkTarget.Event(hex), via, props.orNull()))
     }
 
     fun <P : LinkProps> event(
         relation: Relation<P>,
         tag: GenericETag?,
-        via: String? = null,
+        via: String,
         props: P? = null,
     ) {
         if (tag != null) event(relation, tag.eventId, via, props)
@@ -70,17 +91,17 @@ class LinkBuilder {
     fun <P : LinkProps> user(
         relation: Relation<P>,
         pubkey: String?,
-        via: String? = null,
+        via: String,
         props: P? = null,
     ) {
         val hex = normalizedHex(pubkey) ?: return
-        links.add(Link(relation, LinkTarget.User(hex), via, props.orNull()))
+        add(Link(relation, LinkTarget.User(hex), via, props.orNull()))
     }
 
     fun <P : LinkProps> user(
         relation: Relation<P>,
         tag: PubKeyReferenceTag?,
-        via: String? = null,
+        via: String,
         props: P? = null,
     ) {
         if (tag != null) user(relation, tag.pubKey, via, props)
@@ -89,17 +110,17 @@ class LinkBuilder {
     fun <P : LinkProps> address(
         relation: Relation<P>,
         address: String?,
-        via: String? = null,
+        via: String,
         props: P? = null,
     ) {
         val value = normalizedAddress(address) ?: return
-        links.add(Link(relation, LinkTarget.Address(value), via, props.orNull()))
+        add(Link(relation, LinkTarget.Address(value), via, props.orNull()))
     }
 
     fun <P : LinkProps> address(
         relation: Relation<P>,
         address: Address?,
-        via: String? = null,
+        via: String,
         props: P? = null,
     ) {
         if (address != null) address(relation, address.toValue(), via, props)
@@ -108,7 +129,7 @@ class LinkBuilder {
     fun <P : LinkProps> address(
         relation: Relation<P>,
         tag: ATag?,
-        via: String? = null,
+        via: String,
         props: P? = null,
     ) {
         if (tag != null) address(relation, tag.toTag(), via, props)
@@ -118,7 +139,7 @@ class LinkBuilder {
     fun <P : LinkProps> eventOrAddress(
         relation: Relation<P>,
         value: String?,
-        via: String? = null,
+        via: String,
         props: P? = null,
     ) {
         if (value == null) return
@@ -126,19 +147,33 @@ class LinkBuilder {
     }
 
     /**
-     * A value that is not an event, a user or an address (a hashtag, a url, an external id, a
-     * group id). [name] is the tag it was written in (the Tag class's `TAG_NAME`): it says how to
-     * read [value], and is part of the target's identity.
+     * A value that is not an event, a user or an address: a hashtag, a URL, a kind, a group id.
+     * [type] is what the value IS, and keys the node with [value]; [via] is the tag it was
+     * written in.
      */
-    fun <P : LinkProps> tag(
+    fun <P : LinkProps> value(
         relation: Relation<P>,
-        name: String,
+        type: ValueType,
         value: String?,
-        via: String? = name,
+        via: String,
         props: P? = null,
     ) {
-        if (value.isNullOrBlank() || name.isEmpty()) return
-        links.add(Link(relation, LinkTarget.Tag(name, value), via, props.orNull()))
+        if (value.isNullOrBlank()) return
+        add(Link(relation, LinkTarget.Tag(type, value), via, props.orNull()))
+    }
+
+    /**
+     * A NIP-73 external content id (an `i` / `I`), resolved to the value it names
+     * ([ValueType.ofExternal]): a URL, a hashtag, a geohash, or an [ValueType.EXTERNAL] id.
+     */
+    fun <P : LinkProps> external(
+        relation: Relation<P>,
+        id: String?,
+        via: String,
+        props: P? = null,
+    ) {
+        val (type, value) = ValueType.ofExternal(id) ?: return
+        value(relation, type, value, via, props)
     }
 
     fun build(): List<Link<*>> = if (links.isEmpty()) emptyList() else links.toList()

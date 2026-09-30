@@ -22,6 +22,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkBuilder
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.RatingProps
 import com.vitorpamplona.quartz.experimental.forks.parseFork
@@ -49,7 +50,7 @@ internal fun KindMappers.Builder.experimentalNotes() {
         each(e.tags, ExperimentalForkATag::parseUnforked) { address(Relation.MENTION, it, ATag.TAG_NAME) }
         quotes(e.tags)
         each(e.tags, PTag::parse) { user(Relation.MENTION, it, PTag.TAG_NAME) }
-        each(e.tags, KindTag::parse) { tag(Relation.TAG, KindTag.TAG_NAME, it.toString()) }
+        each(e.tags, KindTag::parse) { value(Relation.DEFINED_KIND, ValueType.KIND, it.toString(), KindTag.TAG_NAME) }
         contentMentions(e.content)
     }
 
@@ -79,16 +80,23 @@ private fun LinkBuilder.experimentalRatingLinks(e: EntityRatingEvent) {
     each(e.tags, RootAddressTag::parseAddressId) { if (rated.add(it)) address(Relation.RATED, it, RootAddressTag.TAG_NAME, props) }
     each(e.tags, ETag::parse) { if (rated.add(it.eventId)) event(Relation.RATED, it, ETag.TAG_NAME, props) }
     // NIP-73 kinds as written: a book's `k` is `isbn`, not a number.
-    each(e.tags, ReplyKindTag::parse) { tag(Relation.TAG, ReplyKindTag.TAG_NAME, it) }
+    each(e.tags, ReplyKindTag::parse) { value(Relation.RATED_KIND, ValueType.KIND, it, ReplyKindTag.TAG_NAME) }
     each(e.tags, PTag::parse) { user(Relation.RATED_AUTHOR, it, PTag.TAG_NAME, props) }
     val target = e.targetIdentifier()
     if (target.isNotEmpty() && target !in rated) {
         when {
             mark == RatingMark.PROFILE -> user(Relation.RATED, target, DTag.TAG_NAME, props)
+
             mark == RatingMark.RELAY -> Unit
+
+            // A rated hashtag is the topic node every other hashtag reaches.
+            mark == RatingMark.HASHTAG -> value(Relation.RATED, ValueType.HASHTAG, target.lowercase(), DTag.TAG_NAME, props)
+
             target.length == 64 -> event(Relation.RATED, target, DTag.TAG_NAME, props)
+
             LinkBuilder.normalizedAddress(target) != null -> address(Relation.RATED, target, DTag.TAG_NAME, props)
-            else -> tag(Relation.RATED, DTag.TAG_NAME, e.dTag(), DTag.TAG_NAME, props)
+
+            else -> value(Relation.RATED, ValueType.EXTERNAL, e.dTag(), DTag.TAG_NAME, props)
         }
     }
 }

@@ -1,5 +1,12 @@
 # Appendix: every Quartz event class, and what its references mean
 
+> **Read with the catalog.** This appendix is the per-class review as it was decided. Two later
+> changes (2026-09-30, `vocabulary.md` decisions 11 and 12, rule 9) apply to every row: `TAG` no
+> longer exists (each value has a role relation: `g` is `LOCATION`, `r` is `REFERENCE`, `k`/`K`
+> is the `X_KIND` of the target it qualifies, …), and a value's node is keyed by its type
+> (`hashtag:`, `url:`, `kind:`…) rather than its tag letter. The code, its golden tests and the
+> generated [catalog](relations.md) are the current truth.
+
 Companion to [`vocabulary.md`](vocabulary.md).
 
 **Implemented.** Every row now lives as the class's mapper in `engine/…/kinds/` and its golden

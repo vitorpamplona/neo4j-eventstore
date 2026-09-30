@@ -29,8 +29,9 @@ import com.vitorpamplona.quartz.nip01Core.core.HexKey
  * A link always starts at the event that states it (the event is the provenance: its author,
  * its time and whatever supersedes it hang off it), so the source is implicit.
  *
- * @property via where the reference was written: the tag name, or [VIA_CONTENT] for a
- * `nostr:` URI in the text (NIP-27).
+ * @property via where in the event the reference was written: the name of the tag that holds it,
+ * or [VIA_CONTENT] for a `nostr:` URI in the text (NIP-27). Every link a mapper states has one;
+ * only the links the envelope states (`AUTHOR`, `ADDRESS`) have none.
  * @property props the values that qualify this one link (a report's category, a zap's amount,
  * a member's roles), of the type its [relation] declares; null when there are none.
  * [LinkProps.toMap] is their store form.
@@ -53,26 +54,37 @@ data class Link<P : LinkProps>(
  * on these values directly.
  */
 sealed interface LinkTarget {
+    /** What this target is, as a [Relation] declares the targets it takes. */
+    val kind: Target
+
     data class Event(
         val id: HexKey,
-    ) : LinkTarget
+    ) : LinkTarget {
+        override val kind get() = NodeTarget.EVENT
+    }
 
     data class User(
         val pubkey: HexKey,
-    ) : LinkTarget
+    ) : LinkTarget {
+        override val kind get() = NodeTarget.USER
+    }
 
     /** `kind:pubkey:d`, as NIP-01 writes it in an `a` tag (d is empty for replaceable kinds). */
     data class Address(
         val value: String,
-    ) : LinkTarget
+    ) : LinkTarget {
+        override val kind get() = NodeTarget.ADDRESS
+    }
 
     /**
      * A value that is not an event, an address or a user: a hashtag, a URL, an external id, a
-     * NIP-29 group id. [name] is the tag it was written in (`t`, `r`, `i`, `h`…), which says how
-     * to read [value].
+     * group id, a kind. [type] says what it is, never which tag letter carried it, so the same
+     * URL is one node whether an `r` or a NIP-73 `i` wrote it.
      */
     data class Tag(
-        val name: String,
+        val type: ValueType,
         val value: String,
-    ) : LinkTarget
+    ) : LinkTarget {
+        override val kind get() = type
+    }
 }

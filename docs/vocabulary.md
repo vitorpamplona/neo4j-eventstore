@@ -42,20 +42,21 @@ written once, where the tags are already parsed — the pattern `SearchFieldExtr
 A **link** is one statement an event makes about something else:
 
 ```kotlin
-class Relation<P : LinkProps>(val name: String)   // Relation.ROOT: Relation<NoProps>,
-                                                    // Relation.REPORTED: Relation<ReportProps>, … ALL
+class Relation<P : LinkProps>(val name: String, vararg targets: Target)
+    // Relation.ROOT: Relation<NoProps>("ROOT", EVENT, ADDRESS, *EXTERNAL_CONTENT), … ALL
 
 sealed interface LinkTarget {
     data class Event(val id: HexKey) : LinkTarget
     data class User(val pubkey: HexKey) : LinkTarget
-    data class Address(val value: String) : LinkTarget      // kind:pubkey:d
-    data class Tag(val name: String, val value: String) : LinkTarget  // a topic, url, label value…
+    data class Address(val value: String) : LinkTarget               // kind:pubkey:d
+    data class Tag(val type: ValueType, val value: String) : LinkTarget // hashtag, url, kind, group…
 }
 
 data class Link<P : LinkProps>(
     val relation: Relation<P>,
     val target: LinkTarget,
-    val via: String? = null,   // "content" for a nostr: URI in the text, else the Tag class's TAG_NAME
+    val via: String? = null,   // the tag the reference was written in, or "content" (a nostr: URI);
+                               // null only on the envelope's own AUTHOR and ADDRESS
     val props: P? = null,      // the relation's typed qualifiers (a report's category, a zap's amount)
 )
 
@@ -84,20 +85,31 @@ code.
 `links { … }` builds a class's list through `LinkBuilder`, which checks every target once more
 (64-hex ids and keys, `kind:<64-hex>:d` coordinates, non-blank values), lowercases hex so one key
 is one node, drops props with no value present, and drops exact duplicates. A malformed value is
-dropped, never linked.
+dropped, never linked. Two rules no mapper can break, because the builder holds them: `via` is a
+required argument, and a target must be one the relation declares (a mapper that links anything
+else throws, which the golden tests catch). The declarations are the relation catalog,
+[relations.md](relations.md), generated from the code and checked by `RelationCatalogTest`.
 
 Rules the vocabulary follows:
 
-1. **Every link starts at the event that makes the statement.** The event is the provenance: its
-   author, its time, and the version that superseded it all hang off it. The one exception is
-   `AUTHOR` from an address to its pubkey, which no event states.
+1. **Every link starts at the event that makes the statement, and is that event's claim.** The
+   event is the provenance: its author, its time, and the version that superseded it all hang
+   off it. A link records what the event SAYS, not a verified fact: a reply's `PARENT` is the id
+   it names, and its `PARENT_AUTHOR` the pubkey it names, whether or not that is who signed the
+   parent. The only facts are the envelope's: an event's `AUTHOR` (its signature) and its own
+   `ADDRESS`. The one link no event states is `AUTHOR` from an address to its pubkey.
 2. **One relation per role, across kinds.** `PARENT` is a kind 1 reply's parent, a NIP-22
    comment's parent item, a git reply's and a chat reply's. The source event's `kind` says which;
    a query that cares filters on it (`(c:Event {kind: 1111})-[:PARENT]->(x)`). Kinds are not
    repeated in the name.
-3. **The author of acted-on content gets a relation of its own.** A reaction points at the note
-   through `REACTED` and at the note's author through `REACTED_AUTHOR`. "Reactions to my notes"
-   and "reactions to anything by me" stay one hop, and each is its own constant-time count.
+3. **The author of acted-on content gets a relation of its own**, as the event names it. A
+   reaction points at the note through `REACTED` and at the note's author through
+   `REACTED_AUTHOR`. "Reactions to my notes" and "reactions to anything by me" stay one hop, and
+   each is its own constant-time count. `X_AUTHOR` is the author the event CLAIMS (its `p`, rule
+   1): it works when the target is not held, and a client can get it wrong. Where the target is
+   held, its real signer is one hop further, `(r)-[:REACTED]->(n)-[:AUTHOR]->(u)`, and the two can
+   be compared (`docs/schema.md`, S18). The same pattern names a value that qualifies the target:
+   `X_KIND` is the kind the event says its `X` target has (`ROOT_KIND`, `REACTED_KIND`).
 4. **Split a relation when queries separate its meanings on the same target type.** Counting a
    relation per node is constant-time in Neo4j, but filtering on a property reads every edge.
    So a distinction that is filtered all the time becomes two relations: `REPORTED_USER` (a
@@ -105,8 +117,8 @@ Rules the vocabulary follows:
    `FOLLOW` (the kind 3 social graph) is not `SUBSCRIBED` (every other follow-like list).
 5. **No fallback: every class says what its references mean.** Each of the 410 classes
    `EventFactory` types has a mapper (or is registered link-free), and a test holds it: a
-   new kind cannot land without that decision. There is no generic "reference" relation and no
-   rule that guesses from a value's shape. The per-class review showed why guessing is unsafe:
+   new kind cannot land without that decision. There is no generic "reference" relation, no
+   generic "tag" relation for values, and no rule that guesses from a value's shape. The per-class review showed why guessing is unsafe:
    a 64-hex `e` in a chess start event is a board hash, the 30174 `d` is a blinded HMAC, `t` is
    an auth verb in 24242 and `r` holds relay URLs in 10002. A tag that appears on every kind
    (`client`, `zap`, the emoji tag's set address) is emitted once by `Event`, not per class.
@@ -126,11 +138,28 @@ Rules the vocabulary follows:
    (`r.report`).
    - `PARENT`, not NIP-10's `reply` marker: `REPLY_AUTHOR` would read as the author of the
      reply, and `(c)-[:REPLY]->(p)` as if `p` were the reply.
+8. **A relation declares what it points at.** Each relation lists its targets (`event`,
+   `address`, `user`, or value types) in the code, the builder refuses anything else, and the
+   catalog ([relations.md](relations.md)) is generated from those declarations. A relation may
+   point at several node types when the act is one: `MUTE` hides a person, a thread or a word;
+   `MENTION` names a person or a note in passing. What a type never does is change its meaning
+   with its target.
+9. **A value is keyed by what it IS, never by the tag letter that carried it.** A `:Tag` node's
+   key is `<type>:<value>` with a [value type](relations.md#value-types): `hashtag:nostr`,
+   `url:https://…`, `geohash:u4pr`, `kind:1`. So a URL is one node whether an `r` or a NIP-73 `i`
+   wrote it, and a NIP-73 `#nostr` is the same node as a `t` tag's `nostr`. A NIP-73 id resolves
+   by its form (`LinkBuilder.external`): `http(s)://` is a `url`, `#` a `hashtag`, `geo:` a
+   `geohash`, anything else `external` as written.
+10. **`via` is where the reference was written:** the tag's name, or `content` for a `nostr:`
+   URI in the text. Every link a mapper states has one, including relations with a single
+   source today, so a new source never changes a relation's shape.
 
 ## The vocabulary
 
-Targets: **E** event, **A** address, **U** user, **T** tag value. "Kinds" lists the Quartz classes
-the relation comes from today; each row is a golden test when implemented.
+Targets: **E** event, **A** address, **U** user, **T** a value (a `:Tag` node, typed by rule 9).
+This column summarizes the declarations; the exact targets, value types included, are in the
+generated [catalog](relations.md). "Kinds" lists the kinds the relation comes from today, each
+covered by a golden test.
 
 ### Authorship and identity
 
@@ -143,17 +172,17 @@ the relation comes from today; each row is a golden test when implemented.
 
 | Relation | Targets | Meaning | Kinds |
 |---|---|---|---|
-| `ROOT` | E, A | The root: NIP-10 `root` (`root()`), NIP-22 root scope (`E`/`A`), and every NIP that reuses the `root` marker — a NIP-28 message's channel (41, 42), a NIP-53 chat's activity (1311) and a presence's room (10312), a NIP-34 status's or PR update's patch/issue/PR (1630–1633, 1619 `E`) | 1, 1111, 1244, 1622, 41, 42, 1311, 10312, 1619, 1630–1633 |
-| `PARENT` | E, A | The direct parent: NIP-10 `replyingTo()`, NIP-22 parent item (`e`/`a`), NIP-53's parent space (30313 → 30312), a NIP-34 status's accepted revision. Kind 9 (NIP-C7) puts its parent in a **`q`** tag — the case that shows why tag letters cannot be the schema | 1, 1111, 1244, 1622, 2004, 30818, 14, 42, 1311, 9, 30313, 1630–1633 |
+| `ROOT` | E, A, T | The root: NIP-10 `root` (`root()`), NIP-22 root scope (`E`/`A`), and every NIP that reuses the `root` marker — a NIP-28 message's channel (41, 42), a NIP-53 chat's activity (1311) and a presence's room (10312), a NIP-34 status's or PR update's patch/issue/PR (1630–1633, 1619 `E`) | 1, 1111, 1244, 1622, 41, 42, 1311, 10312, 1619, 1630–1633 |
+| `PARENT` | E, A, T | The direct parent: NIP-10 `replyingTo()`, NIP-22 parent item (`e`/`a`), NIP-53's parent space (30313 → 30312), a NIP-34 status's accepted revision. Kind 9 (NIP-C7) puts its parent in a **`q`** tag — the case that shows why tag letters cannot be the schema | 1, 1111, 1244, 1622, 2004, 30818, 14, 42, 1311, 9, 30313, 1630–1633 |
 | `ROOT_AUTHOR` | U | The root scope's author (NIP-22 `P`) | 1111, 1244 |
 | `PARENT_AUTHOR` | U | The parent's author: NIP-22 `p`; on NIP-10 threads (1, 42, 1311) and NIP-C7 chat (9), the `p` that is the parent's author, or its `e` tag's pubkey slot | 1, 9, 42, 1111, 1244, 1311 |
-| `MENTION` | E, A, U | Named in passing: a `p` that notifies, a NIP-10 `mention` marker, a `nostr:` URI in the text (NIP-27, `via: content`; only the `nostr:` form, any case: a bare `npub1…` inside a URL is not a mention) | 1, 1111, 9, 24, 42, 1311, 1621, 1622, 9802, 30023, 30817, 30818, … |
+| `MENTION` | E, A, U, T | Named in passing: a `p` that notifies, a NIP-10 `mention` marker, a `nostr:` URI in the text (NIP-27, `via: content`; only the `nostr:` form, any case: a bare `npub1…` inside a URL is not a mention) | 1, 1111, 9, 24, 42, 1311, 1621, 1622, 9802, 30023, 30817, 30818, … |
 | `QUOTE` | E, A | A NIP-18 `q` (except kind 9, where `q` is the parent) | 1, 42, 1111, 1311, 1621, 30023, … |
-| `FORK` | E | The event a note forks (the `fork` marker) | 1 |
+| `FORK` | E, A | The event a note forks (the `fork` marker) | 1 |
 | `EDITED` | E | The event this one edits | 1010 (TextNoteModification), 3302 |
 | `RECIPIENT` | U | A direct or gift-wrapped message's recipients | 4, 14, 15, 24, 1059, 21059 |
 | `COMMUNITY` | A | A NIP-72 community a post is submitted to (and an approval's community) | posts tagging a 34550, 4550 |
-| `REPOSITORY` | A | A NIP-34 patch's, PR's or issue's repository | 1617, 1618, 1621 |
+| `REPOSITORY` | A, T | A NIP-34 patch's, PR's or issue's repository | 1617, 1618, 1621 |
 
 ### Reactions, reposts, zaps
 
@@ -166,10 +195,10 @@ the relation comes from today; each row is a golden test when implemented.
 | `ZAPPED` | E, A | The zapped content. Props: `msats` | 9734, 9735, 9733, 9321, 8333, 9736, 9737 |
 | `ZAP_RECIPIENT` | U | Who is paid (NIP-57 `p`, the "recipient"). Props: `msats` | same |
 | `ZAP_SENDER` | U | Who paid (NIP-57's "sender"): the `P`, and the author of the zap request embedded in `description` (`via: description`) when no `P` names it; one relationship, so a `P` equal to the request's author is one link, and a `P` that disagrees with it is kept beside it | 9735 |
-| `HIGHLIGHTED` | E, A | The highlighted source | 9802 |
+| `HIGHLIGHTED` | E, A, T | The highlighted source | 9802 |
 | `HIGHLIGHTED_AUTHOR` | U | Its author | 9802 |
 | `CITED` | E, A, U | A `nostr:` URI inside text the event quotes rather than writes (a highlight's excerpt): the quoted author named it, not the event's | 9802 |
-| `RATED` | E, A, U | The rated entity | 34259 |
+| `RATED` | E, A, U, T | The rated entity | 34259 |
 
 ### Moderation
 
@@ -180,8 +209,8 @@ the relation comes from today; each row is a golden test when implemented.
 | `REPORTED` | E, A, T | Reported content (T: a blob hash) | 1984 |
 | `REPORTED_AUTHOR` | U | The author of reported content | 1984 |
 | `LABELED` | E, A, U, T | NIP-32 label targets. Props: `labels` (the `l` values, with namespace) | 1985 |
-| `MUTE` | U, E, T | A mute list's entries: people, threads, words/hashtags | 10000, 30007 |
-| `HIDDEN` | E | A NIP-28 "hide message" | 43 |
+| `MUTE` | E, U, T | A mute list's entries: people, threads, words/hashtags | 10000, 30007 |
+| `HIDDEN` | E, T | A NIP-28 "hide message" | 43 |
 | `CHANNEL_MUTED` | U | A NIP-28 "mute user": channel moderation, not a personal mute | 44 |
 | `APPROVED` | E, A | A NIP-72 approval's post | 4550 |
 | `MODERATOR` | U | A community's moderators | 34550 |
@@ -196,12 +225,12 @@ property of the current graph schema: "user-wide reports of X" is
 | Relation | Targets | Meaning | Kinds |
 |---|---|---|---|
 | `FOLLOW` | U | A kind 3 follow list's entries — the social graph | 3 |
-| `SUBSCRIBED` | U, E, A, T | Every other "follow this" list: media follows, communities, public chats, interests (hashtags and interest sets) | 10020, 10004, 10005, 10015 |
-| `MEMBER` | U, E, A | Membership in a named set or directory: follow sets, starter packs, author lists, trusted lists, calendars, publications, emoji sets | 30000, 39089, 39092, 10017, 10101, 10064, 30392–30395, 31924, 30040, 30045, 10030 |
-| `RECOMMENDED` | A | A NIP-89 recommendation's app handler | 31989 |
-| `BOOKMARK` | E, A | Bookmark lists' and sets' entries | 10003, 30001, 30003 |
+| `SUBSCRIBED` | E, A, U, T | Every other "follow this" list: media follows, communities, public chats, interests (hashtags and interest sets) | 10020, 10004, 10005, 10015 |
+| `MEMBER` | E, A, U, T | Membership in a named set or directory: follow sets, starter packs, author lists, trusted lists, calendars, publications, emoji sets | 30000, 39089, 39092, 10017, 10101, 10064, 30392–30395, 31924, 30040, 30045, 10030 |
+| `RECOMMENDED` | A, U | A NIP-89 recommendation's app handler | 31989 |
+| `BOOKMARK` | E, A, T | Bookmark lists' and sets' entries | 10003, 30001, 30003 |
 | `CURATED` | E, A | Published curation sets' entries | 30004, 30005, 30006, 30063, 30267, 37517 |
-| `PIN` | E | Pinned to a profile or a live stream | 10001, 30311 / 30313 (`pinned`) |
+| `PIN` | E, A | Pinned to a profile or a live stream | 10001, 30311 / 30313 (`pinned`) |
 
 ### Badges (NIP-58)
 
@@ -215,7 +244,7 @@ property of the current graph schema: "user-wide reports of X" is
 
 | Relation | Targets | Meaning | Kinds |
 |---|---|---|---|
-| `SUBJECT` | U, E, A | The assertion's subject (`d`). Props: `rank`, `followers`, … | 30382, 30383, 30384 |
+| `SUBJECT` | E, A, U, T | The assertion's subject (`d`). Props: `rank`, `followers`, … | 30382, 30383, 30384 |
 | `SERVICE_PROVIDER` | U | A 10040's provider for one assertion. Props: `service` (`30382:rank`) — one link per entry | 10040 |
 
 ### Events, calendars, live activities, markets
@@ -223,7 +252,7 @@ property of the current graph schema: "user-wide reports of X" is
 | Relation | Targets | Meaning | Kinds |
 |---|---|---|---|
 | `PARTICIPANT` | U | Listed participants / speakers / hosts | 30311, 30312, 30313, 31922, 31923 |
-| `CALENDAR_EVENT` | A, E | A calendar RSVP's calendar event | 31925 |
+| `CALENDAR_EVENT` | E, A | A calendar RSVP's calendar event | 31925 |
 | `RAIDED` | A | A live-activity raid's target | 1312 |
 | `CLIPPED` | A | A clip's stream | 1313 |
 | `CLIPPED_AUTHOR` | U | The clipped stream's host | 1313 |
@@ -233,12 +262,40 @@ property of the current graph schema: "user-wide reports of X" is
 | `TIMESTAMPED` | E | An OpenTimestamps proof's target (NIP-03 says "target", too generic to name a relation) | 1040 |
 | `REDIRECT` | A | A wiki redirect's destination | 30819 |
 
-### Topics and plain tags
+### Topics, places and other values
+
+Each value relation names the value's role, and its target's type says what the value is
+(rule 9). A kind names the kind of the target the event's other relation points at (`X_KIND`,
+rule 3).
 
 | Relation | Targets | Meaning | Kinds |
 |---|---|---|---|
-| `HASHTAG` | T | A `t` tag | any |
-| `TAG` | T | Any other allowlisted value tag: `i` (external id), `k`, `l`/`L`, `r` (url), `g` (geohash). The target's name says which | any |
+| `HASHTAG` | T | A topic: a `t` tag | 1, 20, 21, 1111, 1311, 9041, 30023, 30311, 30402, 30617, 31922, 34236, 39701, … (38 kinds) |
+| `LOCATION` | T | Where the event is, or is about: a `g` geohash | 1, 20, 31, 32, 1315, 1316, 2473, 9002, 10166, 20000, 20001, 30166, 31922, 31923, 37516, 37517, 39000 |
+| `REFERENCE` | T | A web resource the event references: an `r` URL (NIP-01/24's "reference") | 1, 1313, 2003, 9041, 30315, 31922, 31923, 32176 |
+| `LANGUAGE` | T | The language of the content | 1337, 39307, 40008 |
+| `LABEL` / `LABEL_NAMESPACE` | T | A NIP-32 label (`l`) and its namespace (`L`) | 1984, 1985 |
+| `IDENTITY` | T | A NIP-39 external identity (`platform:identity`) | 0, 10011 |
+| `SPECIES` | T | The species observed (a Wikidata URL) | 2473, 12473 |
+| `SCHEMA` / `SCHEMA_NAMESPACE` | T | A ContextVM schema hash and namespace | 11317 |
+| `TRANSACTION` | T | The bitcoin transaction an on-chain zap names | 8333 |
+| `TORRENT` | T | A file's BitTorrent info hash | 1063 |
+| `KEY_PACKAGE_REF` | T | A Marmot KeyPackageRef, the key a Welcome resolves | 30443 |
+| `ROOT_KIND` / `PARENT_KIND` | T | The kind of the `ROOT` / `PARENT` (NIP-22 `K` / `k`) | 1111, 1244 |
+| `REACTED_KIND` | T | The kind of the reacted content | 7, 17 |
+| `REPOSTED_KIND` | T | The kind of the reposted event | 6, 16 |
+| `DELETED_KIND` | T | A kind the deletion covers | 5 |
+| `ZAPPED_KIND` | T | The kind of the zapped content | 8333, 9321, 9734, 9735, 9736, 9737 |
+| `TIMESTAMPED_KIND` | T | The kind of the timestamped event | 1040 |
+| `APPROVED_KIND` | T | The kind of the approved post | 4550 |
+| `SUBJECT_KIND` | T | The NIP-73 kind of an external-id assertion's subject | 30385 |
+| `RATED_KIND` | T | The kind of the rated entity | 34259 |
+| `RECOMMENDED_KIND` | T | The kind a recommendation is for | 31873, 38000 |
+| `ABOUT_KIND` | T | The kind of the events a wake-up is about | 23903 |
+| `SUPPORTED_KIND` | T | A kind the event's subject handles: an app handler's, a relay's, an attestor's | 11871, 30166, 31990 |
+| `ALLOWED_KIND` | T | A kind a community's rules allow | 34551 |
+| `DEFINED_KIND` | T | A kind a NIP text defines | 30817 |
+| `DRAFT_KIND` | T | The kind of the drafted event | 31234 |
 
 ### Every kind: tags any event may carry
 
@@ -298,6 +355,8 @@ Open:
 ## What changed in the graph (schema 2.0)
 
 - The relationship type is the relation name, and the link's props and `via` are its
+  properties. Each relation declares its targets ([relations.md](relations.md)), and a `:Tag`
+  node is keyed `<type>:<value>` by what the value is (rule 9), with `type` and `value`
   properties. `RoleTable`, `LinkRules`, the report extractors and the kind registry are gone:
   their knowledge is in the mappers.
 - The store keeps what is about STORAGE: the curated node values (names, reaction symbol,
@@ -373,7 +432,7 @@ implementing (each is detailed in its appendix row):
   author; otherwise it is `MENTION`. `ROOT` / `PARENT` also take **T** (NIP-22 `I`/`i` scopes).
 - `PARENT` does not apply to 30818 (NIP-54 articles have none); `FORK` takes E and A.
 - Kind 24's `p` tags are `RECIPIENT` only; `MENTION` there comes from content alone.
-- Kind 1985's `t` / `r` are label targets (`LABELED`), not `HASHTAG` / `TAG`.
+- Kind 1985's `t` / `r` are label targets (`LABELED`), not `HASHTAG` / `REFERENCE`.
 - A Buzz-style lone `reply` marker is a direct reply: both `ROOT` and `PARENT`.
 - NIP-10 is read as marked OR positional, never both: once any `e` (or non-community `a`)
   carries a `root` / `reply` marker, the unmarked `e`s beside it are `MENTION`s, not a
@@ -403,9 +462,10 @@ implementing (each is detailed in its appendix row):
    only `h`, so there is nothing to scope it by. Marmot's `h` is a random global id and has no
    such limit.
 3. **Decided: URLs and external ids are valid T targets** (kind 17 reactions, highlight
-   sources, web bookmarks 39701, NIP-22 `I` scopes, NIP-73 ids).
-4. **Value tags need a per-class opt-in.** The same letter means different things by kind, so
-   `HASHTAG` / `TAG` come from each class's mapper, never from a global allowlist.
+   sources, web bookmarks 39701, NIP-22 `I` scopes, NIP-73 ids), keyed by what they name (rule 9).
+4. **Value tags need a per-class opt-in.** The same letter means different things by kind (an
+   `l` is a NIP-32 label on 1985 and a language on 1337), so every value relation comes from
+   each class's mapper, never from a global allowlist.
 5. **Decided: no links derived from an event's own `d`** (30618 → its repository, 39001–39005 →
    the group, 30177 → its agent). They restate the event's `ADDRESS`; the graph can join on it.
    The exception is a `d` that names something OTHER than the event: a NIP-85 assertion's
@@ -413,7 +473,9 @@ implementing (each is detailed in its appendix row):
    URL (39701), and a `d` on a regular (non-addressable) kind, which is no address at all.
 6. **Decided: references inside content JSON are left out for now** (buzz 40099 / 40902 /
    44100, DVM results, 30175–30177, marketplace stalls). The appendix rows keep them, marked,
-   for later. **One exception, decided:** a zap receipt's (9735) `description` embeds the zap
+   for later; their relations (`MERCHANT`, `PALETTE`, `PERSONA`, `SCHEDULED`, `SEARCH_AUTHOR`,
+   `STALL`, `ZAP_REQUEST`) are not in the catalog until a mapper writes them, since the catalog
+   is what a graph can hold. **One exception, decided:** a zap receipt's (9735) `description` embeds the zap
    request, which Quartz already parses (`ZapReceiptEvent.zapRequest`); its author is the
    `ZAP_SENDER`, the same relation as the `P` that NIP-57 copies from it (`via: description`
    when no `P` names that author). Nothing else is read out of the description.
@@ -432,6 +494,15 @@ implementing (each is detailed in its appendix row):
     `MENTION` edges told apart by `via` (`p` vs `content`); a query that wants "mentioned at all"
     counts distinct targets. Text the event QUOTES rather than writes (a highlight's excerpt)
     names its references as `CITED`, not `MENTION`: they are the quoted author's, not the event's.
+11. **Decided: no generic `TAG` relation.** It carried `i`, `k`, `l`/`L`, `r` and `g` values and
+    left the meaning to the target's key prefix, which rule 5 forbids for references and rule 4
+    for anything a query separates. Each value now has a role relation (`LOCATION`, `REFERENCE`,
+    `LANGUAGE`, `LABEL`, `X_KIND`, …), and each `:Tag` a type (rule 9).
+12. **Decided: `X_AUTHOR` stays, as a claim.** The `p` a reaction or reply writes is the author
+    the event names; NIP-22 and NIP-25 call it that, and it is the only author known while the
+    target is not held. It is not checked against the target's real signer at write time (the
+    target may arrive later, or never), so the schema documents it as a claim (rule 1) and shows
+    the one-hop comparison with the real `AUTHOR` (`docs/schema.md`, S18).
 
 
 ## Plan

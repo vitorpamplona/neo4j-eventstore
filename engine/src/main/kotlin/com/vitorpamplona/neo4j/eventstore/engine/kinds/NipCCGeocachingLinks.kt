@@ -21,6 +21,7 @@
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.FoundProps
 import com.vitorpamplona.quartz.nip01Core.tags.aTag.ATag
@@ -38,7 +39,7 @@ import com.vitorpamplona.quartz.nipCCGeocaching.verification.tags.FinderCacheTag
 internal fun KindMappers.Builder.nipCCGeocaching() {
     on<GeocacheCurationListEvent> { e ->
         e.geocaches().forEach { address(Relation.CURATED, it, ATag.TAG_NAME) }
-        each(e.tags, GeoHashTag::parse) { tag(Relation.TAG, GeoHashTag.TAG_NAME, it) }
+        each(e.tags, GeoHashTag::parse) { value(Relation.LOCATION, ValueType.GEOHASH, it, GeoHashTag.TAG_NAME) }
     }
 
     // NIP-CC: the cache found. Whether the log carries its cache's verification rides on the link; the verification itself is an embedded event, not a reference.
@@ -52,7 +53,7 @@ internal fun KindMappers.Builder.nipCCGeocaching() {
         user(Relation.WINNER, e.firstToFindWinner(), FirstToFindWinnerTag.TAG_NAME)
         user(Relation.VERIFIER, e.verificationKey(), VerificationKeyTag.TAG_NAME)
         hashtags(e.tags)
-        each(e.tags, GeoHashTag::parse) { tag(Relation.TAG, GeoHashTag.TAG_NAME, it) }
+        each(e.tags, GeoHashTag::parse) { value(Relation.LOCATION, ValueType.GEOHASH, it, GeoHashTag.TAG_NAME) }
     }
 
     // NIP-CC's `a` here is the composite `<finder>:<naddr>`, not a NIP-01 address: it names both the finder and the cache.

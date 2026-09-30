@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.ServiceProps
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.SubjectProps
 import com.vitorpamplona.quartz.nip85TrustedAssertions.addressables.AddressableAssertionEvent
@@ -72,7 +73,7 @@ class Nip85TrustedAssertionsLinksTest {
                     "d",
                     SubjectProps(rank = 89, followers = 1200, hops = 2, firstCreatedAt = 1672531200L),
                 ),
-                Link(Relation.HASHTAG, LinkTarget.Tag("t", "bitcoin"), "t"),
+                Link(Relation.HASHTAG, LinkTarget.Tag(ValueType.HASHTAG, "bitcoin"), "t"),
             ),
             event.links(),
         )
@@ -134,8 +135,8 @@ class Nip85TrustedAssertionsLinksTest {
 
         assertEquals(
             listOf(
-                Link(Relation.SUBJECT, LinkTarget.Tag("i", "isbn:9780765382030"), "d", SubjectProps(reactionCount = 5)),
-                Link(Relation.TAG, LinkTarget.Tag("k", "isbn"), "k"),
+                Link(Relation.SUBJECT, LinkTarget.Tag(ValueType.EXTERNAL, "isbn:9780765382030"), "d", SubjectProps(reactionCount = 5)),
+                Link(Relation.SUBJECT_KIND, LinkTarget.Tag(ValueType.KIND, "isbn"), "k"),
             ),
             event.links(),
         )

@@ -21,6 +21,7 @@
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.quartz.nip39ExtIdentities.ExternalIdentitiesEvent
 import com.vitorpamplona.quartz.nip39ExtIdentities.IdentityClaimTag
@@ -32,6 +33,9 @@ internal fun KindMappers.Builder.nip39ExtIdentities() {
      * NIP makes mandatory and names known platforms in lowercase, so one identity is one node.
      */
     on<ExternalIdentitiesEvent> { e ->
-        each(e.tags, IdentityClaimTag::parse) { tag(Relation.TAG, IdentityClaimTag.TAG_NAME, it.platformIdentity()) }
+        each(
+            e.tags,
+            IdentityClaimTag::parse,
+        ) { value(Relation.IDENTITY, ValueType.IDENTITY, it.platformIdentity(), IdentityClaimTag.TAG_NAME) }
     }
 }

@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.LinkProps
 import com.vitorpamplona.quartz.nip01Core.core.TagArray
 import com.vitorpamplona.quartz.nip10Notes.TextNoteEvent
@@ -78,9 +79,10 @@ class Nip10NotesLinksTest {
 
     private fun <P : LinkProps> tg(
         relation: Relation<P>,
-        name: String,
+        type: ValueType,
         value: String,
-    ) = Link(relation, LinkTarget.Tag(name, value), name)
+        via: String,
+    ) = Link(relation, LinkTarget.Tag(type, value), via)
 
     @Test
     fun markedReplyNamesRootParentAndOnlyTheParentsAuthor() {
@@ -117,9 +119,9 @@ class Nip10NotesLinksTest {
                 ad(Relation.QUOTE, article, "q"),
                 ad(Relation.COMMUNITY, community),
                 ad(Relation.MENTION, "30311:$bystander:live"),
-                tg(Relation.HASHTAG, "t", "nostr"),
-                tg(Relation.TAG, "r", "https://example.com/"),
-                tg(Relation.TAG, "g", "u4pruy"),
+                tg(Relation.HASHTAG, ValueType.HASHTAG, "nostr", "t"),
+                tg(Relation.REFERENCE, ValueType.URL, "https://example.com/", "r"),
+                tg(Relation.LOCATION, ValueType.GEOHASH, "u4pruy", "g"),
                 us(Relation.MENTION, bystander, Link.VIA_CONTENT),
             ),
             event.links(),

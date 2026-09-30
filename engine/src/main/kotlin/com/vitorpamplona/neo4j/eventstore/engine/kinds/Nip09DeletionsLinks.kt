@@ -21,6 +21,7 @@
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.quartz.nip01Core.tags.aTag.ATag
 import com.vitorpamplona.quartz.nip01Core.tags.events.ETag
@@ -37,6 +38,6 @@ internal fun KindMappers.Builder.nip09Deletions() {
         each(e.tags, ETag::parseId) { event(Relation.DELETED, it, ETag.TAG_NAME) }
         each(e.tags, ATag::parseAddress) { address(Relation.DELETED, it, ATag.TAG_NAME) }
         each(e.tags, PTag::parseKey) { user(Relation.DELETED_AUTHOR, it, PTag.TAG_NAME) }
-        each(e.tags, KindTag::parse) { tag(Relation.TAG, KindTag.TAG_NAME, it.toString()) }
+        each(e.tags, KindTag::parse) { value(Relation.DELETED_KIND, ValueType.KIND, it.toString(), KindTag.TAG_NAME) }
     }
 }

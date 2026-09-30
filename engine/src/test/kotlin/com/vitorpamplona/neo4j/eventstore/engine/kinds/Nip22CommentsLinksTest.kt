@@ -23,6 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.LinkProps
 import com.vitorpamplona.quartz.nip01Core.core.TagArray
 import com.vitorpamplona.quartz.nip19Bech32.entities.NAddress
@@ -76,15 +77,15 @@ class Nip22CommentsLinksTest {
         assertEquals(
             listOf(
                 link(Relation.ROOT, LinkTarget.Event(root), "E"),
-                link(Relation.TAG, LinkTarget.Tag("k", "1"), "K"),
+                link(Relation.ROOT_KIND, LinkTarget.Tag(ValueType.KIND, "1"), "K"),
                 link(Relation.ROOT_AUTHOR, LinkTarget.User(rootAuthor), "P"),
                 link(Relation.PARENT, LinkTarget.Event(parent), "e"),
-                link(Relation.TAG, LinkTarget.Tag("k", "1111"), "k"),
+                link(Relation.PARENT_KIND, LinkTarget.Tag(ValueType.KIND, "1111"), "k"),
                 link(Relation.PARENT_AUTHOR, LinkTarget.User(parentAuthor), "p"),
                 // NIP-22: a p for a pubkey mentioned in the content is not the parent's author
                 link(Relation.MENTION, LinkTarget.User(bystander), "p"),
                 link(Relation.QUOTE, LinkTarget.Address("30023:$bystander:post"), "q"),
-                link(Relation.HASHTAG, LinkTarget.Tag("t", "bitcoin"), "t"),
+                link(Relation.HASHTAG, LinkTarget.Tag(ValueType.HASHTAG, "bitcoin"), "t"),
                 link(Relation.MENTION, LinkTarget.Event(cited), Link.VIA_CONTENT),
             ),
             event.links(),
@@ -107,10 +108,10 @@ class Nip22CommentsLinksTest {
 
         assertEquals(
             listOf(
-                link(Relation.ROOT, LinkTarget.Tag("i", "https://example.com/post"), "I"),
-                link(Relation.TAG, LinkTarget.Tag("k", "web"), "K"),
-                link(Relation.PARENT, LinkTarget.Tag("i", "https://example.com/post"), "i"),
-                link(Relation.TAG, LinkTarget.Tag("k", "web"), "k"),
+                link(Relation.ROOT, LinkTarget.Tag(ValueType.URL, "https://example.com/post"), "I"),
+                link(Relation.ROOT_KIND, LinkTarget.Tag(ValueType.KIND, "web"), "K"),
+                link(Relation.PARENT, LinkTarget.Tag(ValueType.URL, "https://example.com/post"), "i"),
+                link(Relation.PARENT_KIND, LinkTarget.Tag(ValueType.KIND, "web"), "k"),
                 link(Relation.MENTION, LinkTarget.User(bystander), "p"),
             ),
             event.links(),
@@ -136,10 +137,10 @@ class Nip22CommentsLinksTest {
             listOf(
                 link(Relation.ROOT, LinkTarget.Address(community), "A"),
                 link(Relation.COMMUNITY, LinkTarget.Address(community), "A"),
-                link(Relation.TAG, LinkTarget.Tag("k", "34550"), "K"),
+                link(Relation.ROOT_KIND, LinkTarget.Tag(ValueType.KIND, "34550"), "K"),
                 link(Relation.ROOT_AUTHOR, LinkTarget.User(parentAuthor), "P"),
                 link(Relation.PARENT, LinkTarget.Address(community), "a"),
-                link(Relation.TAG, LinkTarget.Tag("k", "34550"), "k"),
+                link(Relation.PARENT_KIND, LinkTarget.Tag(ValueType.KIND, "34550"), "k"),
                 // the parent is an address: its author is the coordinate's pubkey
                 link(Relation.PARENT_AUTHOR, LinkTarget.User(parentAuthor), "p"),
             ),

@@ -120,7 +120,7 @@ class BulkCsvWriter(
                 }
 
                 NodeKind.TAG -> {
-                    out(TAGS, "key:ID(Tag),name,value").apply {
+                    out(TAGS, "key:ID(Tag),type,value").apply {
                         write(listOf(q(key), q(key.substringBefore(':')), q(key.substringAfter(':'))).joinToString(","))
                         newLine()
                     }

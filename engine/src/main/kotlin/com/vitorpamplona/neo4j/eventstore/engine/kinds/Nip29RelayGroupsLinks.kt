@@ -22,6 +22,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkBuilder
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.ValueType
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.OrderProps
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.RoleProps
@@ -71,7 +72,7 @@ internal fun KindMappers.Builder.nip29RelayGroups() {
         nip29Groups(e.tags)
         nip29Subgroups(e.tags)
         hashtags(e.tags)
-        each(e.tags, GeoHashTag::parse) { tag(Relation.TAG, GeoHashTag.TAG_NAME, it) }
+        each(e.tags, GeoHashTag::parse) { value(Relation.LOCATION, ValueType.GEOHASH, it, GeoHashTag.TAG_NAME) }
     }
     on<GroupPutUserEvent> { e ->
         nip29Groups(e.tags)
@@ -97,9 +98,13 @@ internal fun KindMappers.Builder.nip29RelayGroups() {
     on<GroupMetadataEvent> { e ->
         nip29Subgroups(e.tags)
         each(e.tags, HashtagTag::parse) {
-            if (it !in GroupMetadataEvent.BUZZ_CHANNEL_TYPES) tag(Relation.HASHTAG, HashtagTag.TAG_NAME, it.lowercase())
+            if (it !in
+                GroupMetadataEvent.BUZZ_CHANNEL_TYPES
+            ) {
+                value(Relation.HASHTAG, ValueType.HASHTAG, it.lowercase(), HashtagTag.TAG_NAME)
+            }
         }
-        each(e.tags, GeoHashTag::parse) { tag(Relation.TAG, GeoHashTag.TAG_NAME, it) }
+        each(e.tags, GeoHashTag::parse) { value(Relation.LOCATION, ValueType.GEOHASH, it, GeoHashTag.TAG_NAME) }
     }
     // NIP-29 group admins, `["p", <pubkey>, <role>…]`: the roles are relay-defined, so they ride on the link.
     on<GroupAdminsEvent> { e ->
@@ -117,7 +122,8 @@ internal fun KindMappers.Builder.nip29RelayGroups() {
 }
 
 /** The `h` group a user-signed NIP-29 event is scoped to ([GroupIdTag]) → [Relation.GROUP]. */
-private fun LinkBuilder.nip29Groups(tags: TagArray) = each(tags, GroupIdTag::parse) { tag(Relation.GROUP, GroupIdTag.TAG_NAME, it) }
+private fun LinkBuilder.nip29Groups(tags: TagArray) =
+    each(tags, GroupIdTag::parse) { value(Relation.GROUP, ValueType.GROUP, it, GroupIdTag.TAG_NAME) }
 
 /**
  * NIP-29 subgroups: [ParentTag] → [Relation.PARENT], each [ChildTag] → [Relation.CHILD]. Both
@@ -125,8 +131,8 @@ private fun LinkBuilder.nip29Groups(tags: TagArray) = each(tags, GroupIdTag::par
  * keeps which tag said it.
  */
 private fun LinkBuilder.nip29Subgroups(tags: TagArray) {
-    each(tags, ParentTag::parse) { tag(Relation.PARENT, GroupIdTag.TAG_NAME, it, ParentTag.TAG_NAME) }
-    each(tags, ChildTag::parse) { tag(Relation.CHILD, GroupIdTag.TAG_NAME, it, ChildTag.TAG_NAME) }
+    each(tags, ParentTag::parse) { value(Relation.PARENT, ValueType.GROUP, it, ParentTag.TAG_NAME) }
+    each(tags, ChildTag::parse) { value(Relation.CHILD, ValueType.GROUP, it, ChildTag.TAG_NAME) }
 }
 
 /**
