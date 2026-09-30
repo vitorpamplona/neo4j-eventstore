@@ -243,6 +243,161 @@ MATCH (n:Event:Stored {id: id})<-[:REACTED]-(:Stored)-[:AUTHOR]->(r:User)
 RETURN n, count(DISTINCT r) AS reactors ORDER BY reactors DESC;
 ```
 
+## Showcase: what meaning-typed relations buy you
+
+Each query below would need per-kind tag knowledge under a `<tag>_<kind>` schema (which `e` is the
+root? which `p` is the zap sender? which `a` is a badge?). With the vocabulary the relation already
+says it, so queries cross kinds freely. `ShowcaseQueriesIT` runs every one of these, extracted from
+this file, against a fixture graph with known answers: edit a query here and the test runs the
+edit.
+
+```cypher
+// S1 — A reputation profile in O(1) per line: every count reads Neo4j's per-type degree store,
+// so it costs the same for a newcomer and for an account with a million followers.
+MATCH (me:User {pubkey: $me})
+RETURN
+  COUNT { (me)<-[:FOLLOW]-() }          AS followers,
+  COUNT { (me)<-[:MUTE]-() }            AS mutedBy,
+  COUNT { (me)<-[:REPORTED_USER]-() }   AS reportsAboutMe,
+  COUNT { (me)<-[:REPORTED_AUTHOR]-() } AS reportsAboutMyContent,
+  COUNT { (me)<-[:ZAP_RECIPIENT]-() }   AS zapsReceived,
+  COUNT { (me)<-[:ZAP_SENDER]-() }      AS zapsSent,
+  COUNT { (me)<-[:REACTED_AUTHOR]-() }  AS reactionsToMyContent,
+  COUNT { (me)<-[:PARENT_AUTHOR]-() }   AS repliesToMe,
+  COUNT { (me)<-[:AWARDED]-() }         AS badgesAwarded;
+
+// S2 — Everything the network did with one article, across kinds: NIP-22 comments (ROOT),
+// reactions, quotes, highlights, zaps, labels, reports — one hop, grouped by what it means.
+MATCH (a:Address {id: $article})<-[r]-(e:Stored)
+WHERE NOT type(r) IN ['ADDRESS']
+RETURN type(r) AS relation, e.kind AS kind, count(*) AS events
+ORDER BY events DESC;
+
+// S3 — Tagged vs. cited: the same MENTION, told apart by `via` (a `p` tag that notifies vs. a
+// `nostr:` URI in the prose), per kind.
+MATCH (me:User {pubkey: $me})<-[m:MENTION]-(n:Stored)
+WHERE n.created_at >= $since
+RETURN m.via AS how, n.kind AS kind, count(*) AS mentions
+ORDER BY mentions DESC;
+
+// S4 — Conversations with the most distinct voices: every NIP-10 reply points at its ROOT,
+// whatever depth it sits at.
+MATCH (root:Stored {kind: 1})<-[:ROOT]-(reply:Stored)-[:AUTHOR]->(who:User)
+WHERE root.created_at >= $since
+WITH root, count(reply) AS replies, count(DISTINCT who) AS voices
+WHERE voices >= 5
+RETURN root, replies, voices ORDER BY voices DESC, replies DESC LIMIT 20;
+
+// S5 — The deepest branches of a reply tree: a quantified path over PARENT, to the leaves.
+MATCH path = (root:Event {id: $id}) ((p)<-[:PARENT]-(c:Stored)){1,12} (leaf:Stored)
+WHERE NOT EXISTS { (leaf)<-[:PARENT]-(:Stored) }
+RETURN leaf.id AS leaf, length(path) AS depth
+ORDER BY depth DESC LIMIT 10;
+
+// S6 — Reactions to a note weighted by MY trust provider: my 10040 names the service whose
+// 30382 cards rank people; each reactor's rank comes from that service's card about them.
+MATCH (:Address {id: '10040:' + $me + ':'})<-[:ADDRESS]-(:Stored)-[:SERVICE_PROVIDER {via: '30382:rank'}]->(provider:User)
+MATCH (:Event:Stored {id: $note})<-[:REACTED]-(r:Stored)-[:AUTHOR]->(reactor:User)
+OPTIONAL MATCH (reactor)<-[s:SUBJECT]-(card:Stored {kind: 30382})-[:AUTHOR]->(provider)
+WITH reactor, r, coalesce(s.rank, 0) AS rank
+RETURN r.content AS reaction, count(*) AS votes, sum(rank) AS trust
+ORDER BY trust DESC;
+
+// S7 — My biggest zappers, and whether I follow them back: ZAP_RECIPIENT carries the amount,
+// ZAP_SENDER names the zapper (from the receipt's `P`, or the zap request it embeds).
+MATCH (me:User {pubkey: $me})<-[zr:ZAP_RECIPIENT]-(receipt:Stored {kind: 9735})-[:ZAP_SENDER]->(fan:User)
+WHERE receipt.created_at >= $since
+WITH fan, sum(zr.msats) AS msats, count(receipt) AS zaps
+OPTIONAL MATCH (:Address {id: '3:' + $me + ':'})<-[:ADDRESS]-(mine:Stored)-[f:FOLLOW]->(fan)
+RETURN fan, zaps, msats / 1000 AS sats, f IS NOT NULL AS iFollowThem
+ORDER BY msats DESC LIMIT 25;
+
+// S8 — Web-of-trust moderation: people reported AS PEOPLE (not for one note) by at least three
+// of my follows' follows, in serious categories, that I have not already muted.
+MATCH (:Address {id: '3:' + $me + ':'})<-[:ADDRESS]-(:Stored)-[:FOLLOW]->(f:User)
+MATCH (:Address {id: '3:' + f.pubkey + ':'})<-[:ADDRESS]-(:Stored)-[:FOLLOW]->(fof:User)
+WITH DISTINCT fof WHERE fof.pubkey <> $me
+MATCH (fof)<-[:AUTHOR]-(rep:Stored {kind: 1984})-[r:REPORTED_USER]->(suspect:User)
+WHERE r.report IN ['impersonation', 'spam', 'illegal']
+WITH suspect, r.report AS category, count(DISTINCT fof) AS reporters
+WHERE reporters >= 3
+AND NOT EXISTS { (:Address {id: '10000:' + $me + ':'})<-[:ADDRESS]-(:Stored)-[:MUTE]->(suspect) }
+RETURN suspect, category, reporters ORDER BY reporters DESC;
+
+// S9 — What a labeler I trust has labeled, and how: NIP-32 labels ride the LABELED edge as a
+// list of `namespace:label`, whatever the target's kind (note, user, article, URL).
+MATCH (labeler:User {pubkey: $labeler})<-[:AUTHOR]-(l:Stored {kind: 1985})-[r:LABELED]->(target)
+WHERE any(label IN r.labels WHERE label STARTS WITH 'ugc:')
+RETURN labels(target)[0] AS what, r.labels AS labels, count(*) AS labeled
+ORDER BY labeled DESC LIMIT 50;
+
+// S10 — Who was awarded a badge, and who wears it: the award (kind 8) names the definition and
+// the awardees; a profile badge list (30008 `profile_badges`, or 10008) accepts the award.
+MATCH (:Address {id: $badge})<-[:BADGE_DEFINITION]-(award:Stored {kind: 8})-[:AWARDED]->(u:User)
+OPTIONAL MATCH (shelf:Address)<-[:ADDRESS]-(list:Stored)-[:BADGE_AWARD]->(award)
+WHERE shelf.id IN ['30008:' + u.pubkey + ':profile_badges', '10008:' + u.pubkey + ':']
+RETURN u, list IS NOT NULL AS wearsIt ORDER BY wearsIt DESC;
+
+// S11 — A community's moderators at work: the definition names them (MODERATOR), their
+// approvals (4550) point at the community and at the posts they approved.
+MATCH (c:Address {id: $community})<-[:ADDRESS]-(def:Stored)-[:MODERATOR]->(mod:User)
+OPTIONAL MATCH (c)<-[:COMMUNITY]-(approval:Stored {kind: 4550})-[:AUTHOR]->(mod)
+WHERE approval.created_at >= $since
+OPTIONAL MATCH (approval)-[:APPROVED]->(post:Stored)
+RETURN mod, count(DISTINCT approval) AS approvals, count(DISTINCT post) AS postsStillHeld
+ORDER BY approvals DESC;
+
+// S12 — What Nostr says about a book, a URL or a podcast (NIP-73 external ids): NIP-22 comments
+// scope it as ROOT / PARENT, other kinds tag or mention it — one `:Tag` node joins them all.
+MATCH (subject:Tag {key: 'i:' + $externalId})<-[r:ROOT|PARENT|REACTED|MENTION|TAG]-(e:Stored)-[:AUTHOR]->(who:User)
+RETURN type(r) AS relation, e.kind AS kind, count(e) AS events, count(DISTINCT who) AS people
+ORDER BY events DESC;
+
+// S13 — The most highlighted sources, and who the highlighted passages themselves cite: CITED
+// keeps a quoted author's `nostr:` references apart from the highlighter's own MENTIONs.
+MATCH (h:Stored {kind: 9802})-[:HIGHLIGHTED]->(source)
+WHERE h.created_at >= $since
+OPTIONAL MATCH (h)-[:CITED]->(cited)
+RETURN source, count(DISTINCT h) AS highlights, collect(DISTINCT cited)[..5] AS citedInExcerpts
+ORDER BY highlights DESC LIMIT 20;
+
+// S14 — Replies left behind by deletions: the deleted note is gone (a stub), the NIP-09 request
+// still points at it, and so do the replies that were written to it.
+MATCH (del:Stored {kind: 5})-[:DELETED]->(gone:Event)
+WHERE NOT gone:Stored AND del.created_at >= $since
+MATCH (gone)<-[:PARENT]-(orphan:Stored)
+RETURN gone.id AS deleted, count(orphan) AS repliesLeftBehind
+ORDER BY repliesLeftBehind DESC LIMIT 20;
+
+// S15 — Who is going to an event, and how many of them I follow: NIP-52 RSVPs carry their
+// status on the CALENDAR_EVENT edge.
+MATCH (:Address {id: $calendarEvent})<-[r:CALENDAR_EVENT]-(rsvp:Stored {kind: 31925})-[:AUTHOR]->(u:User)
+WITH u, r.status AS status
+OPTIONAL MATCH (:Address {id: '3:' + $me + ':'})<-[:ADDRESS]-(:Stored)-[f:FOLLOW]->(u)
+RETURN status, count(u) AS people, count(f) AS peopleIFollow;
+
+// S16 — Degrees of separation through CURRENT follow lists only: each hop goes user → their
+// kind-3 address → its one held version → FOLLOW, so superseded lists never form a path.
+MATCH path = SHORTEST 1
+  (a:User {pubkey: $from})
+  (()<-[:AUTHOR]-(:Address {kind: 3})<-[:ADDRESS]-(:Stored)-[:FOLLOW]->()){1,4}
+  (b:User {pubkey: $to})
+RETURN length(path) / 3 AS hops, [n IN nodes(path) WHERE n:User | n.pubkey] AS chain;
+
+// S17 — Rank a search result (ids from a NIP-50 REQ to the relay) by engagement, every signal an
+// O(1) degree read: reactions, reposts, quotes, direct replies, thread size, zaps.
+UNWIND $ids AS id
+MATCH (n:Event:Stored {id: id})
+RETURN n.id AS id,
+  COUNT { (n)<-[:REACTED]-() } AS reactions,
+  COUNT { (n)<-[:REPOSTED]-() } AS reposts,
+  COUNT { (n)<-[:QUOTE]-() } AS quotes,
+  COUNT { (n)<-[:PARENT]-() } AS directReplies,
+  COUNT { (n)<-[:ROOT]-() } AS threadSize,
+  COUNT { (n)<-[:ZAPPED]-() } AS zaps
+ORDER BY reactions + 2 * reposts + 3 * quotes + 2 * directReplies + 5 * zaps DESC;
+```
+
 ## What the endpoint refuses
 
 Queries must be read-only. A query is refused **before it runs** if its plan:
