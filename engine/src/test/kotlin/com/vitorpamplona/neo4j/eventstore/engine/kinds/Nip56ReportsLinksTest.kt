@@ -107,4 +107,32 @@ class Nip56ReportsLinksTest {
             event.links(),
         )
     }
+
+    @Test
+    fun aBlankTypeSlotWritesNoTypeForABlobEither() {
+        // main's HashSha256Tag reads a blank type as "other"; blank is no type, so the default
+        val event =
+            report(
+                arrayOf(
+                    arrayOf("x", blob, ""),
+                    arrayOf("p", person, "spam"),
+                ),
+            )
+
+        assertEquals(
+            listOf(
+                Link(Relation.REPORTED_AUTHOR, LinkTarget.User(person), "p", props("spam", "spam")),
+                Link(Relation.REPORTED, LinkTarget.Tag("x", blob), "x", props("spam", "spam")),
+            ),
+            event.links(),
+        )
+    }
+
+    @Test
+    fun aReportThatWritesNoTypeIsSpamWithNothingWritten() {
+        assertEquals(
+            listOf(Link(Relation.REPORTED, LinkTarget.Event(note), "e", ReportProps(report = "spam"))),
+            report(arrayOf(arrayOf("e", note, "wss://relay.example/"))).links(),
+        )
+    }
 }
