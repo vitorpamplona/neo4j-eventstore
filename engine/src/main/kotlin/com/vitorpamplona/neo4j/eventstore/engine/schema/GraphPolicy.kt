@@ -46,16 +46,26 @@ data class GraphPolicy(
         return value.length <= maxTagValueBytes && value.encodeToByteArray().size <= maxTagValueBytes
     }
 
-    fun hash(): String {
-        val canonical =
+    /**
+     * The part of the policy that changes what a HELD event projects to: the bounds on tag values
+     * and curated text. [excludedKinds] is left out on purpose: it decides which events are held
+     * (the reconciler converges that by adding and removing them), not how a held one derives, so
+     * changing it must not re-derive the whole graph.
+     */
+    fun derivationHash(): String = sha16("maxTag=" + maxTagValueBytes + ";maxCurated=" + maxCuratedBytes)
+
+    fun hash(): String =
+        sha16(
             "excluded=" + excludedKinds.sorted().joinToString(",") +
-                ";maxTag=" + maxTagValueBytes + ";maxCurated=" + maxCuratedBytes
-        return MessageDigest
+                ";maxTag=" + maxTagValueBytes + ";maxCurated=" + maxCuratedBytes,
+        )
+
+    private fun sha16(canonical: String): String =
+        MessageDigest
             .getInstance("SHA-256")
             .digest(canonical.encodeToByteArray())
             .joinToString("") { "%02x".format(it) }
             .take(16)
-    }
 
     companion object {
         val Default = GraphPolicy()

@@ -32,6 +32,7 @@ class DerivationTest {
         assertEquals(Derivation.VERSION.toLong(), (stamp ushr 32) and 0xFFFF)
         assertEquals(stamp, Derivation.stamp(GraphPolicy()), "a function of the policy's value")
         assertNotEquals(stamp, Derivation.stamp(GraphPolicy(maxTagValueBytes = 128)), "a changed bound re-derives")
+        assertEquals(stamp, Derivation.stamp(GraphPolicy(excludedKinds = setOf(4))), "which kinds are held is not how they derive")
         assertNotEquals(0L, stamp, "0 is what a node written before stamps reads as")
     }
 

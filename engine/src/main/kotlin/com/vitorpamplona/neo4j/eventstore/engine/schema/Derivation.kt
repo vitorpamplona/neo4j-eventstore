@@ -59,14 +59,15 @@ object Derivation {
 
     /**
      * The derivation stamp for [policy]: the schema major (bits 48–63), [VERSION] (bits 32–47)
-     * and the first 32 bits of the policy hash (bits 0–31) in one Long — the policy bounds what
-     * derivation keeps (tag values, curated text), so a changed bound re-derives too. One Long per
+     * and the first 32 bits of the policy's [GraphPolicy.derivationHash] (bits 0–31) in one Long —
+     * the policy bounds what derivation keeps (tag values, curated text), so a changed bound
+     * re-derives too; a changed kind exclusion does not (it changes which events are held). One Long per
      * node is 8 bytes of property store; a node without the property (a graph written before
      * stamps) reads as 0, which no build stamps, so it is re-derived as well.
      */
     fun stamp(policy: GraphPolicy): Long {
         val major = major(SCHEMA_VERSION) ?: 0
-        val policyBits = policy.hash().take(8).toLong(16)
+        val policyBits = policy.derivationHash().take(8).toLong(16)
         return (major.toLong() and 0xFFFF shl 48) or (VERSION.toLong() and 0xFFFF shl 32) or policyBits
     }
 }
