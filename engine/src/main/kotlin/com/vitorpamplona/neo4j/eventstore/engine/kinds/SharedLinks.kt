@@ -40,6 +40,8 @@ import com.vitorpamplona.quartz.nip19Bech32.entities.NEvent
 import com.vitorpamplona.quartz.nip19Bech32.entities.NNote
 import com.vitorpamplona.quartz.nip19Bech32.entities.NProfile
 import com.vitorpamplona.quartz.nip19Bech32.entities.NPub
+import com.vitorpamplona.quartz.nip22Comments.tags.ReplyIdentifierTag
+import com.vitorpamplona.quartz.nip22Comments.tags.ReplyKindTag
 import com.vitorpamplona.quartz.nip30CustomEmoji.EmojiUrlTag
 import com.vitorpamplona.quartz.nip57Zaps.splits.BaseZapSplitSetup
 import com.vitorpamplona.quartz.nip57Zaps.splits.ZapSplitSetup
@@ -199,4 +201,20 @@ private fun String.regionMatchesAscii(
         if (folded != prefix[k]) return false
     }
     return true
+}
+
+/**
+ * NIP-73 external content ids a kind with no scope of its own carries ("`i` tags are used for
+ * referencing these external content ids", on any event): what the event is [Relation.ABOUT],
+ * each resolved to the node it names ([LinkBuilder.external]). Their `k` names the id's kind
+ * (`ABOUT_KIND`) only beside an `i`: a bare `k` on these kinds says nothing NIP-73 defines.
+ * Quartz parses the pair with the NIP-22 classes, which read exactly the `i` / `k` tags.
+ */
+fun LinkBuilder.nip73ExternalIds(tags: TagArray) {
+    var named = false
+    each(tags, ReplyIdentifierTag::parse) {
+        external(Relation.ABOUT, it, ReplyIdentifierTag.TAG_NAME)
+        named = true
+    }
+    if (named) each(tags, ReplyKindTag::parse) { value(Relation.ABOUT_KIND, ValueType.KIND, it, ReplyKindTag.TAG_NAME) }
 }

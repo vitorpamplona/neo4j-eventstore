@@ -62,7 +62,7 @@ class NipBCOnchainZapsLinksTest {
                 Link(Relation.ZAP_RECIPIENT, LinkTarget.User(recipient), "p", msats),
                 Link(Relation.ZAPPED, LinkTarget.Event(zapped), "e", msats),
                 Link(Relation.ZAPPED, LinkTarget.Address(article), "a", msats),
-                Link(Relation.TRANSACTION, LinkTarget.Tag(ValueType.BITCOIN_TX, tx), "i"),
+                Link(Relation.TRANSACTION, LinkTarget.Tag(ValueType.EXTERNAL, tx), "i"),
                 Link(Relation.ZAPPED_KIND, LinkTarget.Tag(ValueType.KIND, "30023"), "k"),
             ),
             event.links(),

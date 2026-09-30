@@ -80,7 +80,7 @@ class ExperimentalListsLinksTest {
                 Link(Relation.ITEM, LinkTarget.Event(note2), "e"),
                 Link(Relation.ITEM, LinkTarget.Address(article), "a"),
                 // a list value, case preserved: not a hashtag
-                Link(Relation.ITEM, LinkTarget.Tag(ValueType.HASHTAG, "Switzerland"), "t"),
+                Link(Relation.ITEM, LinkTarget.Tag(ValueType.HASHTAG, "switzerland"), "t"),
             ),
             ListItemEvent(me, me, 0, tags, "", me).links(),
         )

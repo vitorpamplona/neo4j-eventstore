@@ -20,6 +20,8 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.vocab
 
+import com.vitorpamplona.quartz.utils.Rfc3986
+
 /**
  * What a link may point at. Each [Relation] declares its targets, and [LinkBuilder] refuses a
  * link to anything else: a relationship type then tells a query what can be at its other end,
@@ -78,8 +80,6 @@ enum class ValueType(
 
     TORRENT("btih", "A BitTorrent info hash."),
 
-    BITCOIN_TX("bitcoin_tx", "A bitcoin transaction id."),
-
     KEY_PACKAGE_REF("key_package_ref", "A Marmot KeyPackageRef."),
 
     SCHEMA_HASH("schema_hash", "A ContextVM schema hash."),
@@ -95,7 +95,25 @@ enum class ValueType(
     OBJECT("object", "An opaque object id an audit entry names (a channel UUID, a media hash)."),
     ;
 
+    /**
+     * [value] in the one form that keys its node, so every tag and every NIP-73 id that names the
+     * same thing reaches the same node: hashtags and geohashes lowercase (NIP-73 writes them so),
+     * web URLs normalized without their fragment (NIP-73's form for a URL id, which Quartz's
+     * `UrlId` writes through the same [Rfc3986]). Only `http(s)`: [Rfc3986] reads any other
+     * scheme as a web address (`spotify:search:x` became `https://x/`), so an `r` holding
+     * another URI, or a URL that does not parse, is kept as written.
+     */
+    fun normalize(value: String): String =
+        when (this) {
+            HASHTAG, GEOHASH -> value.lowercase()
+            URL -> if (isWebUrl(value)) runCatching { Rfc3986.normalizeAndRemoveFragment(value) }.getOrNull() ?: value else value
+            else -> value
+        }
+
     companion object {
+        private fun isWebUrl(value: String) =
+            value.startsWith("https://", ignoreCase = true) || value.startsWith("http://", ignoreCase = true)
+
         /** The types a NIP-73 external content id can resolve to ([LinkBuilder.external]). */
         val EXTERNAL_CONTENT: Array<Target> = arrayOf(URL, EXTERNAL, HASHTAG, GEOHASH)
 
@@ -106,7 +124,7 @@ enum class ValueType(
         fun ofExternal(id: String?): Pair<ValueType, String>? {
             if (id.isNullOrBlank()) return null
             return when {
-                id.startsWith("https://", ignoreCase = true) || id.startsWith("http://", ignoreCase = true) -> {
+                isWebUrl(id) -> {
                     URL to id
                 }
 

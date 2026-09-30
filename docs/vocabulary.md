@@ -149,7 +149,12 @@ Rules the vocabulary follows:
    `url:https://…`, `geohash:u4pr`, `kind:1`. So a URL is one node whether an `r` or a NIP-73 `i`
    wrote it, and a NIP-73 `#nostr` is the same node as a `t` tag's `nostr`. A NIP-73 id resolves
    by its form (`LinkBuilder.external`): `http(s)://` is a `url`, `#` a `hashtag`, `geo:` a
-   `geohash`, anything else `external` as written.
+   `geohash`, anything else `external` as written (books, papers, countries, movies, podcasts,
+   blockchain transactions and addresses). Each type has one form (`ValueType.normalize`):
+   hashtags and geohashes lowercase, web URLs normalized without their fragment as NIP-73 writes
+   a URL id (other URIs as written). Every NIP-73 `i` is read: the NIP-22 scopes, kind 17
+   reactions, highlights, 30385 assertions, trusted lists, an on-chain zap's transaction, and,
+   on notes (1) and articles (30023), what the event is `ABOUT` (with its `k` as `ABOUT_KIND`).
 10. **`via` is where the reference was written:** the tag's name, or `content` for a `nostr:`
    URI in the text. Every link a mapper states has one, including relations with a single
    source today, so a new source never changes a relation's shape.
@@ -278,7 +283,7 @@ rule 3).
 | `IDENTITY` | T | A NIP-39 external identity (`platform:identity`) | 0, 10011 |
 | `SPECIES` | T | The species observed (a Wikidata URL) | 2473, 12473 |
 | `SCHEMA` / `SCHEMA_NAMESPACE` | T | A ContextVM schema hash and namespace | 11317 |
-| `TRANSACTION` | T | The bitcoin transaction an on-chain zap names | 8333 |
+| `TRANSACTION` | T | The bitcoin transaction an on-chain zap names, as its NIP-73 id (`external:bitcoin:tx:<id>`, the node a comment on that transaction reaches too) | 8333 |
 | `TORRENT` | T | A file's BitTorrent info hash | 1063 |
 | `KEY_PACKAGE_REF` | T | A Marmot KeyPackageRef, the key a Welcome resolves | 30443 |
 | `ROOT_KIND` / `PARENT_KIND` | T | The kind of the `ROOT` / `PARENT` (NIP-22 `K` / `k`) | 1111, 1244 |
@@ -291,7 +296,7 @@ rule 3).
 | `SUBJECT_KIND` | T | The NIP-73 kind of an external-id assertion's subject | 30385 |
 | `RATED_KIND` | T | The kind of the rated entity | 34259 |
 | `RECOMMENDED_KIND` | T | The kind a recommendation is for | 31873, 38000 |
-| `ABOUT_KIND` | T | The kind of the events a wake-up is about | 23903 |
+| `ABOUT_KIND` | T | The kind of what the event is `ABOUT`: a wake-up's events; a note's or article's NIP-73 id (its `k`, beside an `i`) | 1, 23903, 30023 |
 | `SUPPORTED_KIND` | T | A kind the event's subject handles: an app handler's, a relay's, an attestor's | 11871, 30166, 31990 |
 | `ALLOWED_KIND` | T | A kind a community's rules allow | 34551 |
 | `DEFINED_KIND` | T | A kind a NIP text defines | 30817 |

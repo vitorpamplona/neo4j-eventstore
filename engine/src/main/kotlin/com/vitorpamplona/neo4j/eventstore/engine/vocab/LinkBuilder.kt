@@ -148,8 +148,8 @@ class LinkBuilder {
 
     /**
      * A value that is not an event, a user or an address: a hashtag, a URL, a kind, a group id.
-     * [type] is what the value IS, and keys the node with [value]; [via] is the tag it was
-     * written in.
+     * [type] is what the value IS, and keys the node with [value] in its normal form
+     * ([ValueType.normalize]); [via] is the tag it was written in.
      */
     fun <P : LinkProps> value(
         relation: Relation<P>,
@@ -159,7 +159,7 @@ class LinkBuilder {
         props: P? = null,
     ) {
         if (value.isNullOrBlank()) return
-        add(Link(relation, LinkTarget.Tag(type, value), via, props.orNull()))
+        add(Link(relation, LinkTarget.Tag(type, type.normalize(value)), via, props.orNull()))
     }
 
     /**

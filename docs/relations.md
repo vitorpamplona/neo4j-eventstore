@@ -186,7 +186,7 @@ which is a `:Tag` node keyed `<type>:<value>`.
 | `TIMESTAMPED` | `event` |
 | `TIMESTAMPED_KIND` | `kind` |
 | `TORRENT` | `btih` |
-| `TRANSACTION` | `bitcoin_tx` |
+| `TRANSACTION` | `external` |
 | `TRIGGERED` | `address` |
 | `UNARCHIVED` | `user` |
 | `VERIFIED` | `address` |
@@ -223,7 +223,6 @@ which is a `:Tag` node keyed `<type>:<value>`.
 | `sha256` | The SHA-256 of a blob (a reported media file, NIP-56 `x`). |
 | `git_commit` | A git commit id: the earliest unique commit NIP-34 names a repository by. |
 | `btih` | A BitTorrent info hash. |
-| `bitcoin_tx` | A bitcoin transaction id. |
 | `key_package_ref` | A Marmot KeyPackageRef. |
 | `schema_hash` | A ContextVM schema hash. |
 | `schema_namespace` | A ContextVM schema namespace. |

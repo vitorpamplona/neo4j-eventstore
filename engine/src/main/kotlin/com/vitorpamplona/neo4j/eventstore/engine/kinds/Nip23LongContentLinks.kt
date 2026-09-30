@@ -32,13 +32,14 @@ internal fun KindMappers.Builder.nip23LongContent() {
     // NIP-23: "references to other notes, articles or profiles must be made according to NIP-27
     // ... optionally adding tags for these", so the `e`/`a`/`p` tags are mentions, like the
     // `nostr:` URIs in the text. An article has no thread: though it extends `BaseThreadedEvent`,
-    // its `e`/`a` are never a root or a parent.
+    // its `e`/`a` are never a root or a parent. A NIP-73 `i` is what the article is `ABOUT`.
     on<LongFormContentEvent> { e ->
         each(e.tags, ETag::parseId) { event(Relation.MENTION, it, ETag.TAG_NAME) }
         each(e.tags, ATag::parseAddress) { address(Relation.MENTION, it, ATag.TAG_NAME) }
         each(e.tags, PTag::parseKey) { user(Relation.MENTION, it, PTag.TAG_NAME) }
         quotes(e.tags)
         hashtags(e.tags)
+        nip73ExternalIds(e.tags)
 
         contentMentions(e.content)
     }

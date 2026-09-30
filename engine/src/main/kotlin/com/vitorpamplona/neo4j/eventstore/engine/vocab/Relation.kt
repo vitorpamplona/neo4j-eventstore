@@ -201,7 +201,7 @@ class Relation<P : LinkProps>(
         val SPECIES = Relation<NoProps>("SPECIES", *ValueType.EXTERNAL_CONTENT)
         val SCHEMA = Relation<NoProps>("SCHEMA", ValueType.SCHEMA_HASH)
         val SCHEMA_NAMESPACE = Relation<NoProps>("SCHEMA_NAMESPACE", ValueType.SCHEMA_NAMESPACE)
-        val TRANSACTION = Relation<NoProps>("TRANSACTION", ValueType.BITCOIN_TX)
+        val TRANSACTION = Relation<NoProps>("TRANSACTION", ValueType.EXTERNAL)
         val TORRENT = Relation<NoProps>("TORRENT", ValueType.TORRENT)
         val KEY_PACKAGE_REF = Relation<NoProps>("KEY_PACKAGE_REF", ValueType.KEY_PACKAGE_REF)
         val ROOT_KIND = Relation<NoProps>("ROOT_KIND", ValueType.KIND)

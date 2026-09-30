@@ -39,7 +39,7 @@ internal fun KindMappers.Builder.nipBCOnchainZaps() {
         each(e.tags, PTag::parse) { user(Relation.ZAP_RECIPIENT, it, PTag.TAG_NAME, props) }
         each(e.tags, ETag::parse) { event(Relation.ZAPPED, it, ETag.TAG_NAME, props) }
         each(e.tags, ATag::parse) { address(Relation.ZAPPED, it, ATag.TAG_NAME, props) }
-        each(e.tags, BitcoinTxIdTag::parseScope) { value(Relation.TRANSACTION, ValueType.BITCOIN_TX, it, BitcoinTxIdTag.TAG_NAME) }
+        each(e.tags, BitcoinTxIdTag::parseScope) { external(Relation.TRANSACTION, it, BitcoinTxIdTag.TAG_NAME) }
         each(e.tags, KindTag::parse) { value(Relation.ZAPPED_KIND, ValueType.KIND, it.toString(), KindTag.TAG_NAME) }
     }
 }

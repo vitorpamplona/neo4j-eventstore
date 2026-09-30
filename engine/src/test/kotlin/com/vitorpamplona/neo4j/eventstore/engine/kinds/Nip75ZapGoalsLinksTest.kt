@@ -61,7 +61,7 @@ class Nip75ZapGoalsLinksTest {
                 Link(Relation.FUNDED, LinkTarget.Event(target), "e"),
                 Link(Relation.FUNDED, LinkTarget.Address(article), "a"),
                 Link(Relation.MENTION, LinkTarget.User(mentioned), "p"),
-                Link(Relation.REFERENCE, LinkTarget.Tag(ValueType.URL, "https://example.com"), "r"),
+                Link(Relation.REFERENCE, LinkTarget.Tag(ValueType.URL, "https://example.com/"), "r"),
                 Link(Relation.HASHTAG, LinkTarget.Tag(ValueType.HASHTAG, "fund"), "t"),
             ),
             event.links(),

@@ -38,7 +38,7 @@ Not in the vocabulary tables yet; each needs the maintainer's review like the ta
 
 | Relation | Kinds | Justification (from the reviewing pass) |
 |---|---|---|
-| `ABOUT` | 23903, 30392, 30393, 30394, 30395 | the event a wake-up is about (Quartz builder about(); also the trusted lists' discovery slot) |
+| `ABOUT` | 1, 23903, 30023, 30392, 30393, 30394, 30395 | the event a wake-up is about (Quartz builder about(); also the trusted lists' discovery slot); a note's or article's NIP-73 `i` |
 | `ABOUT_AUTHOR` | 23903 | its author (rule 3; KDoc: 'p-tags identify the AUTHORS of the referenced events', not recipients) |
 | `ACCEPTED` | 30065 | the challenge this event accepts (past participle of the action). OPPONENT: see 30 |
 | `ACTOR` | 8002, 8003, 40099, 44100, 44101, 48001 | – |

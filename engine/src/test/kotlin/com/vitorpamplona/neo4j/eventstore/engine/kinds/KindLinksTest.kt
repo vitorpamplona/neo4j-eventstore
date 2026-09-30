@@ -135,6 +135,19 @@ class KindLinksTest {
     }
 
     @Test
+    fun aValueTakesOneFormPerType() {
+        assertEquals(ValueType.URL.normalize("https://example.com/a"), ValueType.URL.normalize("HTTPS://Example.COM/a#x"))
+        assertEquals("spotify:search:x y", ValueType.URL.normalize("spotify:search:x y"), "another scheme is kept as written")
+        assertEquals("u4pruy", ValueType.GEOHASH.normalize("U4PRUY"))
+        assertEquals("nostr", ValueType.HASHTAG.normalize("Nostr"))
+        assertEquals("isbn:9780765382030", ValueType.EXTERNAL.normalize("isbn:9780765382030"))
+        assertEquals(
+            listOf(Link(Relation.LOCATION, LinkTarget.Tag(ValueType.GEOHASH, "u4pruy"), "g")),
+            links { value(Relation.LOCATION, ValueType.GEOHASH, "U4PRUY", "g") },
+        )
+    }
+
+    @Test
     fun aRelationTakesOnlyTheTargetsItDeclares() {
         assertFailsWith<IllegalArgumentException> { links { user(Relation.HASHTAG, pk, "p") } }
         assertFailsWith<IllegalArgumentException> { links { value(Relation.FOLLOW, ValueType.HASHTAG, "nostr", "t") } }

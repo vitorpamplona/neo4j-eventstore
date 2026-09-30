@@ -65,7 +65,7 @@ class Nip35TorrentsLinksTest {
                 Link(Relation.HASHTAG, LinkTarget.Tag(ValueType.HASHTAG, "movie"), "t"),
                 Link(Relation.QUOTE, LinkTarget.Event(quoted), "q"),
                 Link(Relation.MENTION, LinkTarget.User(other), "p"),
-                Link(Relation.REFERENCE, LinkTarget.Tag(ValueType.URL, "https://example.com"), "r"),
+                Link(Relation.REFERENCE, LinkTarget.Tag(ValueType.URL, "https://example.com/"), "r"),
             ),
             event.links(),
         )

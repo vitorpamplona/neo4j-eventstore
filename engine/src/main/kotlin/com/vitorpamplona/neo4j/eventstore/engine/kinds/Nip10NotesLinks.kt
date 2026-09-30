@@ -92,6 +92,7 @@ internal fun KindMappers.Builder.nip10Notes() {
         hashtags(e.tags)
         each(e.tags, ReferenceTag::parse) { value(Relation.REFERENCE, ValueType.URL, it, ReferenceTag.TAG_NAME) }
         each(e.tags, GeoHashTag::parse) { value(Relation.LOCATION, ValueType.GEOHASH, it, GeoHashTag.TAG_NAME) }
+        nip73ExternalIds(e.tags)
 
         contentMentions(e.content)
     }

@@ -61,7 +61,7 @@ class Nip52CalendarLinksTest {
                 Link(Relation.CALENDAR, LinkTarget.Address(calendar), "a"),
                 Link(Relation.HASHTAG, LinkTarget.Tag(ValueType.HASHTAG, "meetup"), "t"),
                 Link(Relation.LOCATION, LinkTarget.Tag(ValueType.GEOHASH, "u4pruy"), "g"),
-                Link(Relation.REFERENCE, LinkTarget.Tag(ValueType.URL, "https://example.com"), "r"),
+                Link(Relation.REFERENCE, LinkTarget.Tag(ValueType.URL, "https://example.com/"), "r"),
             )
         assertEquals(expected, CalendarDateSlotEvent(id, host, 1, tags, "", sig).links())
         assertEquals(expected, CalendarTimeSlotEvent(id, host, 1, tags, "", sig).links())

@@ -367,4 +367,37 @@ class Nip10NotesLinksTest {
             },
         )
     }
+
+    @Test
+    fun aNoteIsAboutTheNip73IdsItCarriesAndTheyJoinTheSameNodesAsItsTags() {
+        val event =
+            note(
+                arrayOf(
+                    arrayOf("r", "https://example.com/post"),
+                    arrayOf("g", "U4PRUY"),
+                    arrayOf("i", "podcast:item:guid:d98d189b-dc7b-45b1-8720-d4b98690f31f"),
+                    // the URL id NIP-73 writes without its fragment, the geohash lowercase:
+                    // the same nodes as the `r` and the `g` above
+                    arrayOf("i", "https://example.com/post#comments"),
+                    arrayOf("i", "geo:u4pruy"),
+                    arrayOf("k", "podcast:item:guid"),
+                ),
+            )
+        assertEquals(
+            listOf(
+                tg(Relation.REFERENCE, ValueType.URL, "https://example.com/post", "r"),
+                tg(Relation.LOCATION, ValueType.GEOHASH, "u4pruy", "g"),
+                tg(Relation.ABOUT, ValueType.EXTERNAL, "podcast:item:guid:d98d189b-dc7b-45b1-8720-d4b98690f31f", "i"),
+                tg(Relation.ABOUT, ValueType.URL, "https://example.com/post", "i"),
+                tg(Relation.ABOUT, ValueType.GEOHASH, "u4pruy", "i"),
+                tg(Relation.ABOUT_KIND, ValueType.KIND, "podcast:item:guid", "k"),
+            ),
+            event.links(),
+        )
+    }
+
+    @Test
+    fun aKindWithoutAnIdSaysNothing() {
+        assertEquals(emptyList(), note(arrayOf(arrayOf("k", "web"))).links())
+    }
 }
