@@ -169,4 +169,29 @@ class Nip85TrustedAssertionsLinksTest {
             event.links(),
         )
     }
+
+    @Test
+    fun aProviderEntryWithoutARelayStillNamesTheProvider() {
+        // the relay only says where to fetch the assertions; the trust is stated without it
+        val event =
+            TrustProviderListEvent(
+                id,
+                "f".repeat(64),
+                1L,
+                arrayOf(
+                    arrayOf("30382:rank", provider),
+                    arrayOf("30382:followers", provider, "not a relay"),
+                ),
+                "",
+                sig,
+            )
+
+        assertEquals(
+            listOf(
+                Link(Relation.SERVICE_PROVIDER, LinkTarget.User(provider), "30382:rank", ServiceProps("30382:rank")),
+                Link(Relation.SERVICE_PROVIDER, LinkTarget.User(provider), "30382:followers", ServiceProps("30382:followers")),
+            ),
+            event.links(),
+        )
+    }
 }

@@ -28,7 +28,6 @@ import com.vitorpamplona.quartz.nip85TrustedAssertions.addressables.AddressableA
 import com.vitorpamplona.quartz.nip85TrustedAssertions.events.EventAssertionEvent
 import com.vitorpamplona.quartz.nip85TrustedAssertions.externalIds.ExternalIdAssertionEvent
 import com.vitorpamplona.quartz.nip85TrustedAssertions.list.TrustProviderListEvent
-import com.vitorpamplona.quartz.nip85TrustedAssertions.list.tags.ServiceProviderTag
 import com.vitorpamplona.quartz.nip85TrustedAssertions.users.UserAssertionEvent
 
 /** Quartz's `nip85TrustedAssertions` classes. */
@@ -49,9 +48,10 @@ internal fun KindMappers.Builder.nip85TrustedAssertions() {
     }
 
     // NIP-85: each `<kind>:<tag>` entry names the pubkey the user trusts to sign that assertion,
-    // one `SERVICE_PROVIDER` link per entry with the `service` it provides (`30382:rank`).
+    // one `SERVICE_PROVIDER` link per entry with the `service` it provides (`30382:rank`). The
+    // entry's relay is only where to fetch from: an entry without one still states the trust.
     on<TrustProviderListEvent> { e ->
-        each(e.tags, ServiceProviderTag::parse) { user(Relation.SERVICE_PROVIDER, it.pubkey, it.nip85TagName(), it.nip85LinkProps()) }
+        each(e.tags, Nip85ServiceProviderTag::parse) { user(Relation.SERVICE_PROVIDER, it.pubkey, it.tagName(), it.linkProps()) }
     }
 
     // NIP-85: the `d` is the SUBJECT, the user this card is about (not the card's own identity,
