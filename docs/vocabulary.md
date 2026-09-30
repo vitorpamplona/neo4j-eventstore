@@ -146,7 +146,7 @@ the relation comes from today; each row is a golden test when implemented.
 | `ROOT` | E, A | The root: NIP-10 `root` (`root()`), NIP-22 root scope (`E`/`A`), and every NIP that reuses the `root` marker — a NIP-28 message's channel (41, 42), a NIP-53 chat's activity (1311) and a presence's room (10312), a NIP-34 status's or PR update's patch/issue/PR (1630–1633, 1619 `E`) | 1, 1111, 1244, 1622, 41, 42, 1311, 10312, 1619, 1630–1633 |
 | `PARENT` | E, A | The direct parent: NIP-10 `replyingTo()`, NIP-22 parent item (`e`/`a`), NIP-53's parent space (30313 → 30312), a NIP-34 status's accepted revision. Kind 9 (NIP-C7) puts its parent in a **`q`** tag — the case that shows why tag letters cannot be the schema | 1, 1111, 1244, 1622, 2004, 30818, 14, 42, 1311, 9, 30313, 1630–1633 |
 | `ROOT_AUTHOR` | U | The root scope's author (NIP-22 `P`) | 1111, 1244 |
-| `PARENT_AUTHOR` | U | The parent item's author (NIP-22 `p`) | 1111, 1244 |
+| `PARENT_AUTHOR` | U | The parent's author: NIP-22 `p`; on NIP-10 threads (1, 42, 1311) and NIP-C7 chat (9), the `p` that is the parent's author, or its `e` tag's pubkey slot | 1, 9, 42, 1111, 1244, 1311 |
 | `MENTION` | E, A, U | Named in passing: a `p` that notifies, a NIP-10 `mention` marker, a `nostr:` URI in the text (NIP-27, `via: content`; only the `nostr:` form, any case: a bare `npub1…` inside a URL is not a mention) | 1, 1111, 9, 24, 42, 1311, 1621, 1622, 9802, 30023, 30817, 30818, … |
 | `QUOTE` | E, A | A NIP-18 `q` (except kind 9, where `q` is the parent) | 1, 42, 1111, 1311, 1621, 30023, … |
 | `FORK` | E | The event a note forks (the `fork` marker) | 1 |
