@@ -412,6 +412,12 @@ implementing (each is detailed in its appendix row):
    control events (3079, 3080, 3083) link their push service as `NOTIFICATION_SERVER`; a
    divine.video view (22236) links the video and the version watched as `VIEWED` (new: the
    past participle of the action), with the session `phase`.
+10. **Decided: a tagged mention and a cited one stay two links.** A `p` / `e` tag and a `nostr:`
+    URI in the body come from different parts of the event and may mean different things per
+    kind (a notification target vs. a reference in prose), so a user both tagged and cited is two
+    `MENTION` edges told apart by `via` (`p` vs `content`); a query that wants "mentioned at all"
+    counts distinct targets. Text the event QUOTES rather than writes (a highlight's excerpt)
+    names its references as `CITED`, not `MENTION`: they are the quoted author's, not the event's.
 
 
 ## Plan
