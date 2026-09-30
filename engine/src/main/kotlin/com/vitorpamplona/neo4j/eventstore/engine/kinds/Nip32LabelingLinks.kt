@@ -27,9 +27,7 @@ import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.LabelProps
 import com.vitorpamplona.quartz.nip01Core.core.TagArray
 import com.vitorpamplona.quartz.nip01Core.tags.aTag.ATag
 import com.vitorpamplona.quartz.nip01Core.tags.events.ETag
-import com.vitorpamplona.quartz.nip01Core.tags.hashtags.HashtagTag
 import com.vitorpamplona.quartz.nip01Core.tags.people.PTag
-import com.vitorpamplona.quartz.nip01Core.tags.references.ReferenceTag
 import com.vitorpamplona.quartz.nip32Labeling.LabelEvent
 import com.vitorpamplona.quartz.nip32Labeling.tags.LabelNamespaceTag
 import com.vitorpamplona.quartz.nip32Labeling.tags.LabelTag
@@ -40,15 +38,23 @@ internal fun KindMappers.Builder.nip32Labeling() {
     // never its own topics. Each target carries the labels in `labels`: one `<namespace>:<label>`
     // per `l` tag (`ugc` when unmarked, `nip32Qualified`). The `l`/`L` values are `TAG`s. With no
     // target tag the labels apply to the label event itself, which is no link.
+    //
+    // Three walks, not eight: the `l` tags are parsed once for both their `TAG`s and the props,
+    // and the five target kinds in one pass (`Nip32LabelTargetTag`), in tag order.
     on<LabelEvent> { e ->
-        nip32LabelTags(e.tags)
+        each(e.tags, LabelNamespaceTag::parse) { tag(Relation.TAG, LabelNamespaceTag.TAG_NAME, it.namespace) }
+        val labels = e.labels()
+        labels.forEach { tag(Relation.TAG, LabelTag.TAG_NAME, it.label) }
 
-        val props = LabelProps(e.labels().map { it.nip32Qualified() })
-        each(e.tags, ETag::parse) { event(Relation.LABELED, it, ETag.TAG_NAME, props) }
-        each(e.tags, PTag::parse) { user(Relation.LABELED, it, PTag.TAG_NAME, props) }
-        each(e.tags, ATag::parse) { address(Relation.LABELED, it, ATag.TAG_NAME, props) }
-        each(e.tags, HashtagTag::parse) { tag(Relation.LABELED, HashtagTag.TAG_NAME, it.lowercase(), props = props) }
-        each(e.tags, ReferenceTag::parse) { tag(Relation.LABELED, ReferenceTag.TAG_NAME, it, props = props) }
+        val props = LabelProps(labels.map { it.nip32Qualified() })
+        each(e.tags, Nip32LabelTargetTag::parse) {
+            when (it) {
+                is Nip32LabelTarget.OfEvent -> event(Relation.LABELED, it.tag, ETag.TAG_NAME, props)
+                is Nip32LabelTarget.OfUser -> user(Relation.LABELED, it.tag, PTag.TAG_NAME, props)
+                is Nip32LabelTarget.OfAddress -> address(Relation.LABELED, it.tag, ATag.TAG_NAME, props)
+                is Nip32LabelTarget.OfTag -> tag(Relation.LABELED, it.name, it.value, props = props)
+            }
+        }
     }
 }
 

@@ -26,15 +26,19 @@ import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.PositionProps
 import com.vitorpamplona.quartz.nip01Core.tags.geohash.GeoHashTag
 import com.vitorpamplona.quartz.nip01Core.tags.people.PTag
 import com.vitorpamplona.quartz.nip68Picture.PictureEvent
+import com.vitorpamplona.quartz.nip68Picture.userAnnotations
 import com.vitorpamplona.quartz.nip92IMeta.IMetaTag
+import com.vitorpamplona.quartz.nip92IMeta.imetas
 
 /** Quartz's `nip68Picture` classes. */
 internal fun KindMappers.Builder.nip68Picture() {
     // NIP-68 names its `p` tags "tagged users", and an imeta `annotate-user` places one at a point in the image (its position rides on the link).
     on<PictureEvent> { e ->
         each(e.tags, PTag::parse) { user(Relation.TAGGED, it, PTag.TAG_NAME) }
-        e.imetaTags().forEach { image ->
-            image.annotations.forEach { user(Relation.TAGGED, it.pubkey, IMetaTag.TAG_NAME, PositionProps(it.x, it.y)) }
+        // Only the annotations are read: `imetaTags()` would build a whole PictureMeta per image
+        // (dimensions, hashes, fallbacks…) to throw it away.
+        e.imetas().forEach { image ->
+            image.userAnnotations()?.forEach { user(Relation.TAGGED, it.pubkey, IMetaTag.TAG_NAME, PositionProps(it.x, it.y)) }
         }
         hashtags(e.tags)
         each(e.tags, GeoHashTag::parse) { tag(Relation.TAG, GeoHashTag.TAG_NAME, it) }
