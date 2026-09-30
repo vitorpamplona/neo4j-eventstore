@@ -79,11 +79,11 @@ import com.vitorpamplona.quartz.nip51Lists.muteList.tags.HashtagTag as MutedHash
 /** Quartz's `nip51Lists` classes. */
 internal fun KindMappers.Builder.nip51Lists() {
     // NIP-51: the notes pinned to the profile.
-    on<PinListEvent> { e -> each(e.tags, EventBookmark::parse) { event(Relation.PIN, it.eventId, EventBookmark.TAG_NAME) } }
+    on<PinListEvent> { e -> each(e.tags, EventBookmark::parseId) { event(Relation.PIN, it, EventBookmark.TAG_NAME) } }
 
     // NIP-51: the curated software applications (kind 32267 `a` tags) are `CURATED`.
     on<AppCurationSetEvent> { e ->
-        each(e.tags, AddressBookmark::parse) { address(Relation.CURATED, it.address, AddressBookmark.TAG_NAME) }
+        each(e.tags, AddressBookmark::parseAddress) { address(Relation.CURATED, it, AddressBookmark.TAG_NAME) }
     }
 
     // NIP-51: the curated articles (`a`) and notes (`e`), `e` or `a`, are `CURATED`.
@@ -108,7 +108,7 @@ internal fun KindMappers.Builder.nip51Lists() {
 
     // The feed DVMs (kind 31990 `a` tags) the user marked as favorites.
     on<FavoriteAlgoFeedsListEvent> { e ->
-        each(e.tags, AddressBookmark::parse) { address(Relation.FAVORITE, it.address, AddressBookmark.TAG_NAME) }
+        each(e.tags, AddressBookmark::parseAddress) { address(Relation.FAVORITE, it, AddressBookmark.TAG_NAME) }
     }
 
     // NIP-51 kind 10021: the follow sets (kind 30000 `a` tags) the user favorited; other `a` kinds are skipped, as `publicFavoriteFollowSets` does.
@@ -123,7 +123,7 @@ internal fun KindMappers.Builder.nip51Lists() {
         if (e.dTag() == FollowSetEvent.BLOCK_LIST_D_TAG) {
             nip51Mutes(e.tags)
         } else {
-            each(e.tags, UserTag::parse) { user(Relation.MEMBER, it.pubKey, UserTag.TAG_NAME) }
+            each(e.tags, UserTag::parseKey) { user(Relation.MEMBER, it, UserTag.TAG_NAME) }
         }
     }
 
@@ -131,15 +131,15 @@ internal fun KindMappers.Builder.nip51Lists() {
     on<GeohashListEvent> { e -> each(e.tags, GeoHashTag::parse) { tag(Relation.SUBSCRIBED, GeoHashTag.TAG_NAME, it) } }
 
     // NIP-51: a follow list of code authors, so its `p`s are `SUBSCRIBED` (`FOLLOW` is kind 3 only).
-    on<GitAuthorListEvent> { e -> each(e.tags, GitAuthorTag::parse) { user(Relation.SUBSCRIBED, it.pubKey, GitAuthorTag.TAG_NAME) } }
+    on<GitAuthorListEvent> { e -> each(e.tags, GitAuthorTag::parseKey) { user(Relation.SUBSCRIBED, it, GitAuthorTag.TAG_NAME) } }
 
     // NIP-51: the followed NIP-34 repositories (kind 30617 `a` tags) are `SUBSCRIBED`.
     on<GitRepositoryListEvent> { e ->
-        each(e.tags, AddressBookmark::parse) { address(Relation.SUBSCRIBED, it.address, AddressBookmark.TAG_NAME) }
+        each(e.tags, AddressBookmark::parseAddress) { address(Relation.SUBSCRIBED, it, AddressBookmark.TAG_NAME) }
     }
 
     // NIP-51: the user's "recommended wiki authors" are `RECOMMENDED`.
-    on<GoodWikiAuthorListEvent> { e -> each(e.tags, UserTag::parse) { user(Relation.RECOMMENDED, it.pubKey, UserTag.TAG_NAME) } }
+    on<GoodWikiAuthorListEvent> { e -> each(e.tags, UserTag::parseKey) { user(Relation.RECOMMENDED, it, UserTag.TAG_NAME) } }
 
     free<GoodWikiRelayListEvent>()
 
@@ -158,14 +158,14 @@ internal fun KindMappers.Builder.nip51Lists() {
     // mute of one kind is not a full mute.
     on<KindMuteSetEvent> { e ->
         val props = MuteProps(e.nip51MutedKind())
-        each(e.tags, UserTag::parse) { user(Relation.MUTE, it.pubKey, UserTag.TAG_NAME, props) }
+        each(e.tags, UserTag::parseKey) { user(Relation.MUTE, it, UserTag.TAG_NAME, props) }
     }
 
     // NIP-51: a follow-like list, so its `p`s are `SUBSCRIBED` (`FOLLOW` is kind 3 only).
-    on<MediaFollowListEvent> { e -> each(e.tags, UserTag::parse) { user(Relation.SUBSCRIBED, it.pubKey, UserTag.TAG_NAME) } }
+    on<MediaFollowListEvent> { e -> each(e.tags, UserTag::parseKey) { user(Relation.SUBSCRIBED, it, UserTag.TAG_NAME) } }
 
     // NIP-51: the people in the pack are its `MEMBER`s.
-    on<MediaStarterPackEvent> { e -> each(e.tags, UserTag::parse) { user(Relation.MEMBER, it.pubKey, UserTag.TAG_NAME) } }
+    on<MediaStarterPackEvent> { e -> each(e.tags, UserTag::parseKey) { user(Relation.MEMBER, it, UserTag.TAG_NAME) } }
 
     // NIP-51: every public entry (`p`, `e`, `t`, `word`) is a `MUTE`.
     on<MuteListEvent> { e -> nip51Mutes(e.tags) }
@@ -189,8 +189,8 @@ internal fun KindMappers.Builder.nip51Lists() {
     // app id.
     on<ReleaseArtifactSetEvent> { e ->
         each(e.tags, AppIdTag::parse) { tag(Relation.TAG, AppIdTag.TAG_NAME, it) }
-        each(e.tags, EventBookmark::parse) { event(Relation.CURATED, it.eventId, EventBookmark.TAG_NAME) }
-        each(e.tags, AddressBookmark::parse) { address(Relation.APP, it.address, AddressBookmark.TAG_NAME) }
+        each(e.tags, EventBookmark::parseId) { event(Relation.CURATED, it, EventBookmark.TAG_NAME) }
+        each(e.tags, AddressBookmark::parseAddress) { address(Relation.APP, it, AddressBookmark.TAG_NAME) }
     }
 
     // NIP-51: the NIP-29 groups the user is in are `SUBSCRIBED`. A group is its id, the `h` value
@@ -202,7 +202,7 @@ internal fun KindMappers.Builder.nip51Lists() {
 
     // NIP-51: the people in the pack are its `MEMBER`s; `t` are its topics.
     on<StarterPackEvent> { e ->
-        each(e.tags, UserTag::parse) { user(Relation.MEMBER, it.pubKey, UserTag.TAG_NAME) }
+        each(e.tags, UserTag::parseKey) { user(Relation.MEMBER, it, UserTag.TAG_NAME) }
         hashtags(e.tags)
     }
 
@@ -214,7 +214,7 @@ internal fun KindMappers.Builder.nip51Lists() {
 private fun <P : LinkProps> LinkBuilder.nip51EventsAndAddresses(
     relation: Relation<P>,
     tags: TagArray,
-) = each(tags, BookmarkIdTag::parse) {
+) = each(tags, Nip51ListItems::parseBookmark) {
     when (it) {
         is EventBookmark -> event(relation, it.eventId, EventBookmark.TAG_NAME)
         is AddressBookmark -> address(relation, it.address, AddressBookmark.TAG_NAME)
@@ -226,7 +226,7 @@ private fun <P : LinkProps> LinkBuilder.nip51EventsAndAddresses(
  * the same lowercased node `HASHTAG` uses) and words (`word`, lowercase as NIP-51 writes them).
  */
 private fun LinkBuilder.nip51Mutes(tags: TagArray) =
-    each(tags, MuteTag::parse) {
+    each(tags, Nip51ListItems::parseMute) {
         when (it) {
             is UserTag -> user(Relation.MUTE, it.pubKey, UserTag.TAG_NAME)
             is EventTag -> event(Relation.MUTE, it.eventId, EventTag.TAG_NAME)

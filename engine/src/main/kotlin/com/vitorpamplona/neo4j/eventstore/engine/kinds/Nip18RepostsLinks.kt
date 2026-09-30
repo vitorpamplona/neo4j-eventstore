@@ -42,19 +42,20 @@ internal fun KindMappers.Builder.nip18Reposts() {
  * NIP-18 links of kinds 6 and 16. The reposted event is the LAST `e` (and, for an addressable
  * one, the last `a`), as `BaseRepostEvent.boostedEventId` reads it, and its author the last `p`.
  * Any earlier `e`/`a`/`p` is not part of the repost and is a `MENTION`; `k` is the reposted kind.
- * The reposted event's JSON in the content is the same event as the `e`, not another link.
+ * The reposted event's JSON in the content is the same event as the `e`, not another link. Tags
+ * are read without their relay hints (`parseId`, `parseKey`, `parseAddress`): no link uses one.
  */
 private fun LinkBuilder.nip18RepostLinks(tags: TagArray) {
-    val reposted = tags.lastNotNullOfOrNull(ETag::parse)
-    val repostedAddress = tags.lastNotNullOfOrNull(ATag::parse)
-    val author = tags.lastNotNullOfOrNull(PTag::parse)
+    val reposted = tags.lastNotNullOfOrNull(ETag::parseId)
+    val repostedAddress = tags.lastNotNullOfOrNull(ATag::parseAddress)
+    val author = tags.lastNotNullOfOrNull(PTag::parseKey)
 
     event(Relation.REPOSTED, reposted, ETag.TAG_NAME)
     address(Relation.REPOSTED, repostedAddress, ATag.TAG_NAME)
     user(Relation.REPOSTED_AUTHOR, author, PTag.TAG_NAME)
 
-    each(tags, ETag::parse) { if (it.eventId != reposted?.eventId) event(Relation.MENTION, it, ETag.TAG_NAME) }
-    each(tags, ATag::parse) { if (it.toTag() != repostedAddress?.toTag()) address(Relation.MENTION, it, ATag.TAG_NAME) }
-    each(tags, PTag::parse) { if (it.pubKey != author?.pubKey) user(Relation.MENTION, it, PTag.TAG_NAME) }
+    each(tags, ETag::parseId) { if (it != reposted) event(Relation.MENTION, it, ETag.TAG_NAME) }
+    each(tags, ATag::parseAddress) { if (it != repostedAddress) address(Relation.MENTION, it, ATag.TAG_NAME) }
+    each(tags, PTag::parseKey) { if (it != author) user(Relation.MENTION, it, PTag.TAG_NAME) }
     each(tags, KindTag::parse) { tag(Relation.TAG, KindTag.TAG_NAME, it.toString()) }
 }

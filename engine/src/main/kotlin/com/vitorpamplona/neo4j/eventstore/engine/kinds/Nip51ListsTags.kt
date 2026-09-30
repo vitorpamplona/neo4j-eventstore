@@ -21,7 +21,15 @@
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
 import com.vitorpamplona.quartz.nip51Lists.bookmarkList.OldBookmarkListEvent
+import com.vitorpamplona.quartz.nip51Lists.bookmarkList.tags.AddressBookmark
+import com.vitorpamplona.quartz.nip51Lists.bookmarkList.tags.BookmarkIdTag
+import com.vitorpamplona.quartz.nip51Lists.bookmarkList.tags.EventBookmark
 import com.vitorpamplona.quartz.nip51Lists.kindMuteSet.KindMuteSetEvent
+import com.vitorpamplona.quartz.nip51Lists.muteList.tags.EventTag
+import com.vitorpamplona.quartz.nip51Lists.muteList.tags.MuteTag
+import com.vitorpamplona.quartz.nip51Lists.muteList.tags.UserTag
+import com.vitorpamplona.quartz.nip51Lists.muteList.tags.WordTag
+import com.vitorpamplona.quartz.nip51Lists.muteList.tags.HashtagTag as MutedHashtagTag
 
 /** The `d` values of the deprecated kind 30001 ([OldBookmarkListEvent]) that name the list it stood for; main names none. */
 internal object Nip51OldBookmarkDTags {
@@ -31,3 +39,23 @@ internal object Nip51OldBookmarkDTags {
 
 /** The kind a [KindMuteSetEvent] mutes its users for: its `d`. Main has no accessor for it. */
 internal fun KindMuteSetEvent.nip51MutedKind() = dTag().toIntOrNull()
+
+/**
+ * NIP-51 list items read without their relay hints, which no link uses: main's `parse` of each
+ * normalizes the hint through Quartz's global, synchronized relay-url cache, and a mute list or a
+ * follow set can hold thousands of entries. Each reads the same tags as main's parser, into the
+ * same class, only with the hint left empty.
+ */
+internal object Nip51ListItems {
+    /** A bookmark-like list's `e` or `a` item, as [BookmarkIdTag.parse] reads it. */
+    fun parseBookmark(tag: Array<String>): BookmarkIdTag? =
+        EventBookmark.parseId(tag)?.let { EventBookmark(it) }
+            ?: AddressBookmark.parseAddress(tag)?.let { AddressBookmark(it) }
+
+    /** A mute list's entry (`word`, `p`, `e`, `t`), as [MuteTag.parse] reads it. */
+    fun parseMute(tag: Array<String>): MuteTag? =
+        WordTag.parse(tag)
+            ?: UserTag.parseKey(tag)?.let { UserTag(it) }
+            ?: EventTag.parseId(tag)?.let { EventTag(it) }
+            ?: MutedHashtagTag.parse(tag)
+}

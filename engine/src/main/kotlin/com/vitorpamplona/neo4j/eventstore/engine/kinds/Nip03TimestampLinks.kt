@@ -30,7 +30,7 @@ import com.vitorpamplona.quartz.nip03Timestamp.tags.TargetEventTag
 internal fun KindMappers.Builder.nip03Timestamp() {
     // NIP-03: the `e` is the event the proof timestamps, the `k` its kind.
     on<OtsEvent> { e ->
-        each(e.tags, TargetEventTag::parse) { event(Relation.TIMESTAMPED, it, TargetEventTag.TAG_NAME) }
+        each(e.tags, TargetEventTag::parseId) { event(Relation.TIMESTAMPED, it, TargetEventTag.TAG_NAME) }
         each(e.tags, TargetEventKindTag::parse) { tag(Relation.TAG, TargetEventKindTag.TAG_NAME, it.toString()) }
     }
 }

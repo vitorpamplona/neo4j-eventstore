@@ -32,15 +32,15 @@ import com.vitorpamplona.quartz.nip17Dm.settings.DmRelayListEvent
 internal fun KindMappers.Builder.nip17Dm() {
     // NIP-17: `p` are the receivers, `e` "the direct parent message this post is replying to", `q` a NIP-18 quote.
     on<ChatMessageEvent> { e ->
-        each(e.tags, PTag::parse) { user(Relation.RECIPIENT, it, PTag.TAG_NAME) }
-        each(e.tags, ETag::parse) { event(Relation.PARENT, it, ETag.TAG_NAME) }
+        each(e.tags, PTag::parseKey) { user(Relation.RECIPIENT, it, PTag.TAG_NAME) }
+        each(e.tags, ETag::parseId) { event(Relation.PARENT, it, ETag.TAG_NAME) }
         quotes(e.tags)
         contentMentions(e.content)
     }
     // A file message's `x` and `file-type` describe its blob: not links.
     on<ChatMessageEncryptedFileHeaderEvent> { e ->
-        each(e.tags, PTag::parse) { user(Relation.RECIPIENT, it, PTag.TAG_NAME) }
-        each(e.tags, ETag::parse) { event(Relation.PARENT, it, ETag.TAG_NAME) }
+        each(e.tags, PTag::parseKey) { user(Relation.RECIPIENT, it, PTag.TAG_NAME) }
+        each(e.tags, ETag::parseId) { event(Relation.PARENT, it, ETag.TAG_NAME) }
     }
     free<DmRelayListEvent>()
 }

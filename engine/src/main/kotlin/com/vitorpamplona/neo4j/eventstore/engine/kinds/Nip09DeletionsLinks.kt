@@ -31,11 +31,12 @@ import com.vitorpamplona.quartz.nip09Deletions.DeletionRequestEvent
 /** Quartz's `nip09Deletions` classes. */
 internal fun KindMappers.Builder.nip09Deletions() {
     // NIP-09: the `e`/`a` tags are what this request deletes and `k` their kinds. The `p` is
-    // Quartz's practice (not in NIP-09): the deleted events' author.
+    // Quartz's practice (not in NIP-09): the deleted events' author. Read key-only: no link uses
+    // a relay hint, and normalizing one costs a lock on Quartz's global relay-url cache.
     on<DeletionRequestEvent> { e ->
-        each(e.tags, ETag::parse) { event(Relation.DELETED, it, ETag.TAG_NAME) }
-        each(e.tags, ATag::parse) { address(Relation.DELETED, it, ATag.TAG_NAME) }
-        each(e.tags, PTag::parse) { user(Relation.DELETED_AUTHOR, it, PTag.TAG_NAME) }
+        each(e.tags, ETag::parseId) { event(Relation.DELETED, it, ETag.TAG_NAME) }
+        each(e.tags, ATag::parseAddress) { address(Relation.DELETED, it, ATag.TAG_NAME) }
+        each(e.tags, PTag::parseKey) { user(Relation.DELETED_AUTHOR, it, PTag.TAG_NAME) }
         each(e.tags, KindTag::parse) { tag(Relation.TAG, KindTag.TAG_NAME, it.toString()) }
     }
 }
