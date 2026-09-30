@@ -25,6 +25,7 @@ import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.LinkProps
 import com.vitorpamplona.quartz.nip01Core.core.TagArray
+import com.vitorpamplona.quartz.nip19Bech32.entities.NAddress
 import com.vitorpamplona.quartz.nip19Bech32.entities.NEvent
 import com.vitorpamplona.quartz.nip22Comments.CommentEvent
 import kotlin.test.Test
@@ -140,6 +141,54 @@ class Nip22CommentsLinksTest {
                 link(Relation.PARENT, LinkTarget.Address(community), "a"),
                 link(Relation.TAG, LinkTarget.Tag("k", "34550"), "k"),
                 // the parent is an address: its author is the coordinate's pubkey
+                link(Relation.PARENT_AUTHOR, LinkTarget.User(parentAuthor), "p"),
+            ),
+            event.links(),
+        )
+    }
+
+    @Test
+    fun aNip10StyleParentTagStillNamesTheParentsAuthor() {
+        // written by NIP-10 habit: a marker in slot 3 and the pubkey after it
+        val event =
+            comment(
+                arrayOf(
+                    arrayOf("E", root, "", rootAuthor),
+                    arrayOf("e", parent, "", "reply", parentAuthor),
+                    arrayOf("p", parentAuthor),
+                    arrayOf("p", bystander),
+                ),
+            )
+
+        assertEquals(
+            listOf(
+                link(Relation.ROOT, LinkTarget.Event(root), "E"),
+                link(Relation.PARENT, LinkTarget.Event(parent), "e"),
+                link(Relation.PARENT_AUTHOR, LinkTarget.User(parentAuthor), "p"),
+                link(Relation.MENTION, LinkTarget.User(bystander), "p"),
+            ),
+            event.links(),
+        )
+    }
+
+    @Test
+    fun anNaddrScopeIsDecodedAsTheAddressItNames() {
+        // decoded in the scope AND in the parent's author, never one without the other
+        val article = "30023:$parentAuthor:post"
+        val naddr = NAddress.create(30023, parentAuthor, "post", null)
+        val event =
+            comment(
+                arrayOf(
+                    arrayOf("A", naddr),
+                    arrayOf("a", naddr),
+                    arrayOf("p", parentAuthor),
+                ),
+            )
+
+        assertEquals(
+            listOf(
+                link(Relation.ROOT, LinkTarget.Address(article), "A"),
+                link(Relation.PARENT, LinkTarget.Address(article), "a"),
                 link(Relation.PARENT_AUTHOR, LinkTarget.User(parentAuthor), "p"),
             ),
             event.links(),

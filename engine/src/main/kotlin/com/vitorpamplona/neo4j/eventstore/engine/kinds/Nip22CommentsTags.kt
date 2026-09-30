@@ -21,26 +21,42 @@
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
 import com.vitorpamplona.quartz.nip01Core.core.HexKey
-import com.vitorpamplona.quartz.nip01Core.core.fastForEach
-import com.vitorpamplona.quartz.nip22Comments.CommentEvent
-import com.vitorpamplona.quartz.nip22Comments.tags.ReplyAddressTag
+import com.vitorpamplona.quartz.nip01Core.core.has
 import com.vitorpamplona.quartz.nip22Comments.tags.ReplyEventTag
+import com.vitorpamplona.quartz.utils.ensure
+
+/** A NIP-22 parent item that is an event: its id, and its author when the tag names one. */
+internal data class Nip22ParentEvent(
+    val eventId: HexKey,
+    val author: HexKey?,
+)
 
 /**
- * The authors the parent tags themselves name: the pubkey slot of an `e` ([ReplyEventTag]),
- * the coordinate's pubkey of an `a` ([ReplyAddressTag]). Only a `p` among these is the
- * parent's author; NIP-22 also adds a `p` for every pubkey the content mentions. Main's
- * [CommentEvent] has no such accessor.
+ * A NIP-22 parent-item `e`, `["e", <id>, <relay>, <pubkey>]`, as a [Nip22ParentEvent], without
+ * the relay hint (main's [ReplyEventTag.parse] normalizes it through Quartz's global,
+ * synchronized relay-url cache, and no link uses it).
+ *
+ * The author is whichever of slots 3 and 4 holds a 64-char value: NIP-22 puts it in slot 3, but
+ * comments written by NIP-10 habit put a marker there and the pubkey after it
+ * (`["e", <id>, "", "reply", <pubkey>]`), and main's [ReplyEventTag] reads only slot 3.
  */
-internal fun CommentEvent.nip22ParentTagAuthors(): Set<HexKey> {
-    val authors = HashSet<HexKey>()
-    tags.fastForEach { tag ->
-        ReplyEventTag
-            .parse(tag)
-            ?.ref
-            ?.author
-            ?.let { authors.add(it) }
-        ReplyAddressTag.parseAddress(tag)?.let { authors.add(it.pubKeyHex) }
+internal object Nip22ParentETag {
+    const val TAG_NAME = ReplyEventTag.TAG_NAME
+
+    const val ORDER_EVT_ID = 1
+    const val ORDER_PUBKEY = 3
+    const val ORDER_NIP10_PUBKEY = 4
+
+    fun parse(tag: Array<String>): Nip22ParentEvent? {
+        ensure(tag.has(ORDER_EVT_ID)) { return null }
+        ensure(tag[0] == TAG_NAME) { return null }
+        ensure(tag[ORDER_EVT_ID].length == 64) { return null }
+        return Nip22ParentEvent(tag[ORDER_EVT_ID], pickAuthor(tag))
     }
-    return authors
+
+    private fun pickAuthor(tag: Array<String>): HexKey? {
+        if (tag.has(ORDER_PUBKEY) && tag[ORDER_PUBKEY].length == 64) return tag[ORDER_PUBKEY]
+        if (tag.has(ORDER_NIP10_PUBKEY) && tag[ORDER_NIP10_PUBKEY].length == 64) return tag[ORDER_NIP10_PUBKEY]
+        return null
+    }
 }
