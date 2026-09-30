@@ -50,7 +50,7 @@ internal fun KindMappers.Builder.nip54Wiki() {
         each(e.tags, PTag::parse) { user(Relation.MENTION, it, PTag.TAG_NAME) }
         quotes(e.tags)
         hashtags(e.tags)
-        contentMentions(e.citedNIP19())
+        contentMentions(e.content)
     }
 
     on<WikiMergeAcceptanceEvent> { e ->

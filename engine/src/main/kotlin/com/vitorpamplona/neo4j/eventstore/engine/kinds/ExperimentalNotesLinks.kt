@@ -50,7 +50,7 @@ internal fun KindMappers.Builder.experimentalNotes() {
         quotes(e.tags)
         each(e.tags, PTag::parse) { user(Relation.MENTION, it, PTag.TAG_NAME) }
         each(e.tags, KindTag::parse) { tag(Relation.TAG, KindTag.TAG_NAME, it.toString()) }
-        contentMentions(e.citedNIP19())
+        contentMentions(e.content)
     }
 
     on<EntityRatingEvent> { e -> experimentalRatingLinks(e) }
@@ -148,5 +148,5 @@ private fun LinkBuilder.experimentalZapPollLinks(e: ZapPollEvent) {
     each(e.tags, PTag::parse) { user(if (it.pubKey == parentAuthor) Relation.PARENT_AUTHOR else Relation.MENTION, it, PTag.TAG_NAME) }
     quotes(e.tags)
     each(e.tags, ATag::parse) { address(Relation.MENTION, it, ATag.TAG_NAME) }
-    contentMentions(e.citedNIP19())
+    contentMentions(e.content)
 }

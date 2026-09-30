@@ -52,8 +52,9 @@ internal fun KindMappers.Builder.nip84Highlights() {
         quotes(e.tags)
 
         // The content is the excerpt, the quoted author's words: a `nostr:` URI in it is theirs,
-        // CITED. The highlighter's own words are the `comment` tag's, whose URIs are MENTIONs.
-        contentMentions(e.citedNIP19(), Relation.CITED)
-        each(e.tags, CommentTag::parse) { contentMentions(it) }
+        // CITED. The highlighter's own words are the `comment` tag's, whose URIs are MENTIONs
+        // (via `comment`: the tag they were written in).
+        contentMentions(e.content, Relation.CITED)
+        each(e.tags, CommentTag::parse) { contentMentions(it, via = CommentTag.TAG_NAME) }
     }
 }

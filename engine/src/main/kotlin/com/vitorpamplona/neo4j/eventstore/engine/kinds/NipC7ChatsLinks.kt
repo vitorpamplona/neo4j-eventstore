@@ -56,6 +56,6 @@ internal fun KindMappers.Builder.nipC7Chats() {
         val parentAuthorKey = LinkBuilder.normalizedHex(parentAuthor)
         each(e.tags, PTag::parse) { if (LinkBuilder.normalizedHex(it.pubKey) != parentAuthorKey) user(Relation.MENTION, it, PTag.TAG_NAME) }
         each(e.tags, GroupIdTag::parse) { tag(Relation.GROUP, GroupIdTag.TAG_NAME, it) }
-        contentMentions(e.citedNIP19())
+        contentMentions(e.content)
     }
 }

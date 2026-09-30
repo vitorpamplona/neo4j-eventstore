@@ -60,7 +60,7 @@ internal fun KindMappers.Builder.nip53LiveActivities() {
         each(e.tags, PTag::parse) { user(if (it.pubKey == parentAuthor) Relation.PARENT_AUTHOR else Relation.MENTION, it, PTag.TAG_NAME) }
         quotes(e.tags)
         hashtags(e.tags)
-        contentMentions(e.citedNIP19())
+        contentMentions(e.content)
     }
 
     // The clipped stream, its host (not necessarily the stream's signer, which may be a provider) and the clip's video URL (`r`).

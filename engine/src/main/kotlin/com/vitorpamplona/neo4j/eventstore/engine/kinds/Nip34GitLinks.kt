@@ -51,7 +51,7 @@ internal fun KindMappers.Builder.nip34Git() {
         nip34GitPeopleLinks(e.tags, nip34RepositoryLinks(e.tags))
         quotes(e.tags)
         hashtags(e.tags)
-        contentMentions(e.citedNIP19())
+        contentMentions(e.content)
     }
 
     // NIP-34: the repository (`a`) and its owner's `p`; a series is threaded by marked `e` tags
@@ -95,7 +95,7 @@ internal fun KindMappers.Builder.nip34Git() {
         nip34ThreadLinks(e.threadTags())
         each(e.tags, PTag::parse) { user(Relation.MENTION, it, PTag.TAG_NAME) }
         quotes(e.tags)
-        contentMentions(e.citedNIP19())
+        contentMentions(e.content)
     }
 
     // NIP-34: the other maintainers, topics (including the `personal-fork` marker), the earliest

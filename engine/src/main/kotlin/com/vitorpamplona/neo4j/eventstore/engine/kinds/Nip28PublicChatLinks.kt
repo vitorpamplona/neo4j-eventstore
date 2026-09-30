@@ -78,6 +78,6 @@ internal fun KindMappers.Builder.nip28PublicChat() {
         quotes(e.tags)
         each(e.tags, ATag::parse) { address(Relation.MENTION, it, ATag.TAG_NAME) }
 
-        contentMentions(e.citedNIP19())
+        contentMentions(e.content)
     }
 }

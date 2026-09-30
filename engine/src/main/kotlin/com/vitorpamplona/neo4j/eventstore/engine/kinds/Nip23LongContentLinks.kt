@@ -34,12 +34,12 @@ internal fun KindMappers.Builder.nip23LongContent() {
     // `nostr:` URIs in the text. An article has no thread: though it extends `BaseThreadedEvent`,
     // its `e`/`a` are never a root or a parent.
     on<LongFormContentEvent> { e ->
-        each(e.tags, ETag::parse) { event(Relation.MENTION, it, ETag.TAG_NAME) }
-        each(e.tags, ATag::parse) { address(Relation.MENTION, it, ATag.TAG_NAME) }
-        each(e.tags, PTag::parse) { user(Relation.MENTION, it, PTag.TAG_NAME) }
+        each(e.tags, ETag::parseId) { event(Relation.MENTION, it, ETag.TAG_NAME) }
+        each(e.tags, ATag::parseAddress) { address(Relation.MENTION, it, ATag.TAG_NAME) }
+        each(e.tags, PTag::parseKey) { user(Relation.MENTION, it, PTag.TAG_NAME) }
         quotes(e.tags)
         hashtags(e.tags)
 
-        contentMentions(e.citedNIP19())
+        contentMentions(e.content)
     }
 }

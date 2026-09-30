@@ -31,6 +31,6 @@ internal fun KindMappers.Builder.nipA4PublicMessages() {
     on<PublicMessageEvent> { e ->
         each(e.tags, PTag::parse) { user(Relation.RECIPIENT, it, PTag.TAG_NAME) }
         quotes(e.tags)
-        contentMentions(e.citedNIP19())
+        contentMentions(e.content)
     }
 }

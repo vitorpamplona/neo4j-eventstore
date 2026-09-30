@@ -26,7 +26,11 @@ import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.LinkProps
 import com.vitorpamplona.quartz.nip01Core.core.TagArray
 import com.vitorpamplona.quartz.nip10Notes.TextNoteEvent
+import com.vitorpamplona.quartz.nip19Bech32.entities.NAddress
+import com.vitorpamplona.quartz.nip19Bech32.entities.NEvent
+import com.vitorpamplona.quartz.nip19Bech32.entities.NPub
 import com.vitorpamplona.quartz.nip19Bech32.toNpub
+import com.vitorpamplona.quartz.nip19Bech32.toNsec
 import com.vitorpamplona.quartz.utils.Hex
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -239,6 +243,126 @@ class Nip10NotesLinksTest {
                 ev(Relation.PARENT, parent),
             ),
             event.links(),
+        )
+    }
+
+    @Test
+    fun aPositionalTagWithAPubkeySlotIsRootAndParentAndNamesTheParentsAuthor() {
+        // NIP-10's deprecated positional form with the pubkey the marked form added: no marker,
+        // so still positional (main's unmarkedReply() reads only 2-3 slot tags and drops it).
+        val event =
+            note(
+                arrayOf(
+                    arrayOf("e", parent, "wss://relay.example/", parentAuthor),
+                    arrayOf("p", parentAuthor),
+                    arrayOf("p", bystander),
+                ),
+            )
+        assertEquals(
+            listOf(
+                ev(Relation.ROOT, parent),
+                ev(Relation.PARENT, parent),
+                us(Relation.PARENT_AUTHOR, parentAuthor),
+                us(Relation.MENTION, bystander),
+            ),
+            event.links(),
+        )
+    }
+
+    @Test
+    fun emptyMarkerSlotsAreStillPositional() {
+        val event =
+            note(
+                arrayOf(
+                    arrayOf("e", root, "", ""),
+                    arrayOf("e", other, "", ""),
+                    arrayOf("e", parent, "", ""),
+                ),
+            )
+        assertEquals(
+            listOf(
+                ev(Relation.ROOT, root),
+                ev(Relation.PARENT, parent),
+                ev(Relation.MENTION, other),
+            ),
+            event.links(),
+        )
+    }
+
+    @Test
+    fun aLoneReplyMarkerBesideAnUnmarkedTagIgnoresPosition() {
+        // A client that marks the thread does not leave it to order: the unmarked e is a mention,
+        // not a positional root.
+        val event =
+            note(
+                arrayOf(
+                    arrayOf("e", other),
+                    arrayOf("e", parent, "", "reply"),
+                ),
+            )
+        assertEquals(
+            listOf(
+                ev(Relation.ROOT, parent),
+                ev(Relation.PARENT, parent),
+                ev(Relation.MENTION, other),
+            ),
+            event.links(),
+        )
+    }
+
+    @Test
+    fun aReplyInsideAThreadRootedAtAnAddressHasOnlyThatRoot() {
+        val event =
+            note(
+                arrayOf(
+                    arrayOf("a", article, "", "root"),
+                    arrayOf("e", parent, "", "reply", parentAuthor),
+                    arrayOf("p", parentAuthor),
+                ),
+            )
+        assertEquals(
+            listOf(
+                ad(Relation.ROOT, article),
+                ev(Relation.PARENT, parent),
+                us(Relation.PARENT_AUTHOR, parentAuthor),
+            ),
+            event.links(),
+        )
+    }
+
+    @Test
+    fun onlyNostrUrisInTheTextAreMentions() {
+        val npub = Hex.decode(bystander).toNpub()
+        val profileLink = Hex.decode(rootAuthor).toNpub()
+        val event =
+            note(
+                emptyArray(),
+                // a profile URL names someone the author did not tag; a phone capitalizes the scheme
+                "see https://njump.me/$profileLink and $profileLink and Nostr:$npub",
+            )
+        assertEquals(
+            listOf(us(Relation.MENTION, bystander, Link.VIA_CONTENT)),
+            event.links(),
+        )
+    }
+
+    @Test
+    fun nip27EntitiesReadEveryShapeAfterTheScheme() {
+        val npub = Hex.decode(bystander).toNpub()
+        val nsec = Hex.decode(other).toNsec()
+        val nevent = NEvent.create(quoted, null, null, null)
+        val naddr = NAddress.create(30023, parentAuthor, "article", null)
+        val entities = nip27Entities("(nostr:$npub), NOSTR:${nevent.uppercase()}. nostr:$nsec nostr:$naddr! nostr:npub1short nostr:")
+        assertEquals(
+            listOf("npub:$bystander", "nevent:$quoted", "naddr:$article"),
+            entities.map {
+                when (it) {
+                    is NPub -> "npub:${it.hex}"
+                    is NEvent -> "nevent:${it.hex}"
+                    is NAddress -> "naddr:${it.aTag()}"
+                    else -> "other:$it"
+                }
+            },
         )
     }
 }

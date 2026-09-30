@@ -119,7 +119,7 @@ class Nip84HighlightsLinksTest {
         assertEquals(
             listOf(
                 Link(Relation.CITED, LinkTarget.User(inExcerpt), Link.VIA_CONTENT),
-                Link(Relation.MENTION, LinkTarget.User(inComment), Link.VIA_CONTENT),
+                Link(Relation.MENTION, LinkTarget.User(inComment), "comment"),
             ),
             event.links(),
         )

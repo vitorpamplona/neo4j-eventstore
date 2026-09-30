@@ -50,7 +50,7 @@ internal fun KindMappers.Builder.nip35Torrents() {
             user(if (key == parentAuthor) Relation.PARENT_AUTHOR else Relation.MENTION, key, PTag.TAG_NAME)
         }
         quotes(e.tags)
-        contentMentions(e.citedNIP19())
+        contentMentions(e.content)
     }
 }
 
