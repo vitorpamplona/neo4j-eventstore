@@ -34,4 +34,12 @@ class Nip46RemoteSignerLinksTest {
         val event = NostrConnectEvent("0".repeat(64), "1".repeat(64), 1, arrayOf(arrayOf("p", signer)), "", "0".repeat(128))
         assertEquals(listOf(Link(Relation.RECIPIENT, LinkTarget.User(signer), "p")), event.links())
     }
+
+    @Test
+    fun aMalformedFirstPDoesNotHideTheRecipient() {
+        val signer = "2".repeat(64)
+        val tags = arrayOf(arrayOf("p", "not-a-key"), arrayOf("p", signer))
+        val event = NostrConnectEvent("0".repeat(64), "1".repeat(64), 1, tags, "", "0".repeat(128))
+        assertEquals(listOf(Link(Relation.RECIPIENT, LinkTarget.User(signer), "p")), event.links())
+    }
 }

@@ -23,5 +23,8 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.quartz.nip01Core.tags.people.PTag
 import com.vitorpamplona.quartz.nip46RemoteSigner.NostrConnectEvent
 
-/** Main's `NostrConnectEvent.recipientPubKey()` is private: the first `p`'s value, read as it reads it. */
-internal fun NostrConnectEvent.nip46RecipientPubKey(): String? = tags.firstOrNull { it.size > 1 && it[0] == PTag.TAG_NAME }?.get(1)
+/**
+ * Main's `NostrConnectEvent.recipientPubKey()` is private: the first `p`'s key. Read through
+ * [PTag.parseKey], so a malformed first `p` does not hide a well-formed one after it.
+ */
+internal fun NostrConnectEvent.nip46RecipientPubKey(): String? = tags.firstNotNullOfOrNull(PTag::parseKey)

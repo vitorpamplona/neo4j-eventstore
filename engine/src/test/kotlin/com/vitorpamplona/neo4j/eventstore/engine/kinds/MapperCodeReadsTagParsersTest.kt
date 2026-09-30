@@ -37,6 +37,14 @@ class MapperCodeReadsTagParsersTest {
     private val checks =
         listOf(
             Regex("""\b\w+\[\d+]""") to "tag slot indexing: read through a Tag parser",
+            // The same slot read spelled as a call, on a raw tag: one named like one, a tag a
+            // finder lambda picked (`tags.firstOrNull { … }?.get(1)`), or the first/last tag.
+            // A positional pick among PARSED tags (`eTags.getOrNull(1)`: NIP-15's bid, then its
+            // auction) is the spec's ordering, not a slot, so a plain list name is not matched.
+            Regex(
+                """(?:\b(?:it|t|entry|\w*[Tt]ag)|}|\b(?:first|last|firstOrNull|lastOrNull|single|singleOrNull)\(\))\??""" +
+                    """\.(?:get|getOrNull|getOrElse|elementAt|elementAtOrNull)\(\s*\d+""",
+            ) to "tag slot read by index: read through a Tag parser",
             Regex("""\b(?:it|tag|entry|t)\.size\b""") to "tag size check: the Tag parser decides what is well-formed",
             Regex("""\b(?:mapOf|buildMap|hashMapOf|HashMap)\b""") to "raw-map props: use the relation's props class",
             Regex(""""[A-Za-z][A-Za-z0-9_-]{0,2}"""") to "short string literal: use the Tag parser's TAG_NAME",
