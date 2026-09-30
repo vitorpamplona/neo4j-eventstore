@@ -168,6 +168,7 @@ the relation comes from today; each row is a golden test when implemented.
 | `ZAP_SENDER` | U | Who paid (NIP-57 `P`, the "sender": the embedded request's author) | 9735 |
 | `HIGHLIGHTED` | E, A | The highlighted source | 9802 |
 | `HIGHLIGHTED_AUTHOR` | U | Its author | 9802 |
+| `CITED` | E, A, U | A `nostr:` URI inside text the event quotes rather than writes (a highlight's excerpt): the quoted author named it, not the event's | 9802 |
 | `RATED` | E, A, U | The rated entity | 34259 |
 
 ### Moderation

@@ -114,6 +114,12 @@ class Relation<P : LinkProps>(
         val ZAP_REQUEST = Relation<NoProps>("ZAP_REQUEST")
         val HIGHLIGHTED = Relation<NoProps>("HIGHLIGHTED")
         val HIGHLIGHTED_AUTHOR = Relation<RoleProps>("HIGHLIGHTED_AUTHOR")
+
+        /**
+         * A `nostr:` reference inside text the event QUOTES rather than writes (a highlight's
+         * excerpt): the quoted author named it, so it is not the event author's `MENTION`.
+         */
+        val CITED = Relation<NoProps>("CITED")
         val RATED = Relation<RatingProps>("RATED")
         val RATED_AUTHOR = Relation<RatingProps>("RATED_AUTHOR")
 
@@ -306,6 +312,7 @@ class Relation<P : LinkProps>(
                 ZAP_REQUEST,
                 HIGHLIGHTED,
                 HIGHLIGHTED_AUTHOR,
+                CITED,
                 RATED,
                 RATED_AUTHOR,
                 DELETED,
