@@ -63,16 +63,16 @@ internal fun KindMappers.Builder.nip71Video() {
 /**
  * The links every NIP-71 video kind (21, 22, 34235, 34236) shares.
  * NIP-71 defines `p` as "a participant in the video". divine.video labels its references in the
- * marker slot (see Quartz's `VideoCredits`): `mention` is a passing mention, `inspired-by` and
- * the labels on `a`/`e` (`audio`…) are credits, and any other label on a `p` is the participant's
- * role. The `text-track` names its captions either as a URL (not modelled) or as an event or a
- * 39307 address.
+ * marker slot (see Quartz's `VideoCredits`, read here by [Nip71CreditTag], which keeps a label
+ * written after an empty relay slot): `mention` is a passing mention, `inspired-by` and the labels
+ * on `a`/`e` (`audio`…) are credits, and any other label on a `p` is the participant's role. The
+ * `text-track` names its captions either as a URL (not modelled) or as an event or a 39307 address.
  */
 private fun LinkBuilder.nip71VideoLinks(
     video: VideoEvent,
     tags: TagArray,
 ) {
-    video.credits().forEach { credit ->
+    each(tags, Nip71CreditTag::parse) { credit ->
         val label = credit.label
         when (val target = credit.target) {
             is CreditTarget.Person -> {
@@ -102,8 +102,11 @@ private fun LinkBuilder.nip71VideoLinks(
         }
     }
     video.textTrack().forEach {
-        address(Relation.TEXT_TRACK, it.nip71Address(), TextTrackTag.TAG_NAME)
-        event(Relation.TEXT_TRACK, it.nip71EventId(), TextTrackTag.TAG_NAME)
+        when (val target = it.nip71Target()) {
+            is Nip71TextTrackTarget.ByAddress -> address(Relation.TEXT_TRACK, target.address, TextTrackTag.TAG_NAME)
+            is Nip71TextTrackTarget.ById -> event(Relation.TEXT_TRACK, target.eventId, TextTrackTag.TAG_NAME)
+            null -> Unit
+        }
     }
     hashtags(tags)
 }

@@ -42,10 +42,13 @@ internal fun KindMappers.Builder.nip89AppHandlers() {
         each(e.tags, ATag::parse) { address(Relation.SITE_MANIFEST, it, ATag.TAG_NAME) }
         hashtags(e.tags)
     }
-    // NIP-89: each `a` is a recommended 31990 handler; its 4th slot says for which platform (a blank one names none).
+    // NIP-89: each `a` to a 31990 handler is a recommendation; its 4th slot says for which platform
+    // (a blank one names none). An `a` to any other kind recommends nothing NIP-89 defines, so it is not linked.
     on<AppRecommendationEvent> { e ->
         each(e.tags, RecommendationTag::parse) {
-            address(Relation.RECOMMENDED, it.address, RecommendationTag.TAG_NAME, PlatformProps(it.platform?.ifBlank { null }))
+            if (it.address.kind == AppDefinitionEvent.KIND) {
+                address(Relation.RECOMMENDED, it.address, RecommendationTag.TAG_NAME, PlatformProps(it.platform?.ifBlank { null }))
+            }
         }
     }
 }

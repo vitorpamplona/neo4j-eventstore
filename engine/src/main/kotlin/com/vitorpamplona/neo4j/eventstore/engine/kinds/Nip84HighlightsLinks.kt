@@ -26,6 +26,7 @@ import com.vitorpamplona.quartz.nip01Core.tags.aTag.ATag
 import com.vitorpamplona.quartz.nip01Core.tags.events.ETag
 import com.vitorpamplona.quartz.nip22Comments.tags.ReplyIdentifierTag
 import com.vitorpamplona.quartz.nip84Highlights.HighlightEvent
+import com.vitorpamplona.quartz.nip84Highlights.tags.CommentTag
 
 /** Quartz's `nip84Highlights` classes. */
 internal fun KindMappers.Builder.nip84Highlights() {
@@ -50,6 +51,9 @@ internal fun KindMappers.Builder.nip84Highlights() {
         }
         quotes(e.tags)
 
-        contentMentions(e.citedNIP19())
+        // The content is the excerpt, the quoted author's words: a `nostr:` URI in it is theirs,
+        // CITED. The highlighter's own words are the `comment` tag's, whose URIs are MENTIONs.
+        contentMentions(e.citedNIP19(), Relation.CITED)
+        each(e.tags, CommentTag::parse) { contentMentions(it) }
     }
 }

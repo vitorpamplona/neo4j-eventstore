@@ -51,6 +51,8 @@ class NipC7ChatsLinksTest {
                     arrayOf("q", quoted),
                     arrayOf("q", parent, "wss://relay.example/", parentAuthor),
                     arrayOf("p", mentioned),
+                    // The parent's author, p-tagged too: already the PARENT_AUTHOR, not a mention.
+                    arrayOf("p", parentAuthor),
                     arrayOf("h", "group"),
                 ),
                 "yes nostr:$npub",

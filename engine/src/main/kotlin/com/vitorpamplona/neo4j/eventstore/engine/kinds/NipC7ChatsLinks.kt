@@ -20,6 +20,7 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkBuilder
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.quartz.nip01Core.tags.people.PTag
@@ -50,7 +51,10 @@ internal fun KindMappers.Builder.nipC7Chats() {
                 else -> null
             }
         user(Relation.PARENT_AUTHOR, parentAuthor, QTag.TAG_NAME)
-        each(e.tags, PTag::parse) { user(Relation.MENTION, it, PTag.TAG_NAME) }
+        // A client that also `p`-tags the parent's author (as kinds 1 and 42 do) is not mentioning
+        // them: the `q` already made them the PARENT_AUTHOR, so that `p` adds nothing.
+        val parentAuthorKey = LinkBuilder.normalizedHex(parentAuthor)
+        each(e.tags, PTag::parse) { if (LinkBuilder.normalizedHex(it.pubKey) != parentAuthorKey) user(Relation.MENTION, it, PTag.TAG_NAME) }
         each(e.tags, GroupIdTag::parse) { tag(Relation.GROUP, GroupIdTag.TAG_NAME, it) }
         contentMentions(e.citedNIP19())
     }

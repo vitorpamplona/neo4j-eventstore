@@ -49,7 +49,6 @@ import com.vitorpamplona.quartz.nip29RelayGroups.request.GroupLeaveRequestEvent
 import com.vitorpamplona.quartz.nip29RelayGroups.tags.AddressPin
 import com.vitorpamplona.quartz.nip29RelayGroups.tags.ChildTag
 import com.vitorpamplona.quartz.nip29RelayGroups.tags.EventPin
-import com.vitorpamplona.quartz.nip29RelayGroups.tags.GroupAdminTag
 import com.vitorpamplona.quartz.nip29RelayGroups.tags.GroupIdTag
 import com.vitorpamplona.quartz.nip29RelayGroups.tags.GroupPin
 import com.vitorpamplona.quartz.nip29RelayGroups.tags.ParentTag
@@ -76,8 +75,8 @@ internal fun KindMappers.Builder.nip29RelayGroups() {
     }
     on<GroupPutUserEvent> { e ->
         nip29Groups(e.tags)
-        // NIP-29 put-user: `["p", <pubkey>, <role>…]`, the roles it grants.
-        each(e.tags, GroupAdminTag::parse) { user(Relation.ADDED_USER, it.pubKey, GroupAdminTag.TAG_NAME, RoleProps(it.roles)) }
+        // NIP-29 put-user: `["p", <pubkey>, <role>…]`, the roles it grants (a relay hint is not one).
+        each(e.tags, Nip29RoleTag::parse) { user(Relation.ADDED_USER, it.pubKey, Nip29RoleTag.TAG_NAME, RoleProps(it.roles)) }
     }
     on<GroupRemoveUserEvent> { e ->
         nip29Groups(e.tags)
@@ -104,7 +103,7 @@ internal fun KindMappers.Builder.nip29RelayGroups() {
     }
     // NIP-29 group admins, `["p", <pubkey>, <role>…]`: the roles are relay-defined, so they ride on the link.
     on<GroupAdminsEvent> { e ->
-        each(e.tags, GroupAdminTag::parse) { user(Relation.ADMIN, it.pubKey, GroupAdminTag.TAG_NAME, RoleProps(it.roles)) }
+        each(e.tags, Nip29RoleTag::parse) { user(Relation.ADMIN, it.pubKey, Nip29RoleTag.TAG_NAME, RoleProps(it.roles)) }
     }
     // NIP-29 group members (not exhaustive, per the NIP).
     on<GroupMembersEvent> { e -> each(e.tags, PTag::parse) { user(Relation.MEMBER, it, PTag.TAG_NAME) } }

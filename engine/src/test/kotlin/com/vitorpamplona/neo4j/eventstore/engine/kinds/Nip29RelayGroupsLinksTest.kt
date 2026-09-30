@@ -161,6 +161,27 @@ class Nip29RelayGroupsLinksTest {
     }
 
     @Test
+    fun aRelayHintBeforeTheRolesIsNotARole() {
+        // Main's GroupAdminTag takes every slot from 2 on as a role, the relay hint included.
+        val tags = arrayOf(arrayOf("h", "pizza"), arrayOf("p", alice, "wss://relay.example/", "admin"), arrayOf("p", bob, "", "moderator"))
+        assertEquals(
+            listOf(
+                Link(Relation.ADMIN, LinkTarget.User(alice), "p", RoleProps(roles = listOf("admin"))),
+                Link(Relation.ADMIN, LinkTarget.User(bob), "p", RoleProps(roles = listOf("moderator"))),
+            ),
+            GroupAdminsEvent(id, relay, 1, arrayOf(arrayOf("d", "pizza")) + tags.drop(1), "", sig).links(),
+        )
+        assertEquals(
+            listOf(
+                group,
+                Link(Relation.ADDED_USER, LinkTarget.User(alice), "p", RoleProps(roles = listOf("admin"))),
+                Link(Relation.ADDED_USER, LinkTarget.User(bob), "p", RoleProps(roles = listOf("moderator"))),
+            ),
+            GroupPutUserEvent(id, alice, 1, tags, "", sig).links(),
+        )
+    }
+
+    @Test
     fun relaySignedListsLinkTheirPeopleButNotTheGroupInTheirD() {
         val tags = arrayOf(arrayOf("d", "pizza"), arrayOf("p", alice, "admin", "moderator"), arrayOf("p", "short"))
         assertEquals(

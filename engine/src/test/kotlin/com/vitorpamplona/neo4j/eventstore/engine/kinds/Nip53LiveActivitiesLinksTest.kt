@@ -80,6 +80,39 @@ class Nip53LiveActivitiesLinksTest {
     }
 
     @Test
+    fun chatHasOneParentAndItsAuthor() {
+        // A `root` + `reply` pair used to give two PARENTs; the `p` of the replied-to author was a MENTION.
+        val threadRoot = "4".repeat(64)
+        val event =
+            LiveActivitiesChatMessageEvent(
+                id,
+                viewer,
+                1,
+                arrayOf(
+                    arrayOf("a", stream, "", "root"),
+                    arrayOf("e", threadRoot, "", "root"),
+                    arrayOf("e", message, "", "reply", host),
+                    arrayOf("e", quoted, "", "mention"),
+                    arrayOf("p", host),
+                    arrayOf("p", cited),
+                ),
+                "",
+                sig,
+            )
+        assertEquals(
+            listOf(
+                Link(Relation.ROOT, LinkTarget.Address(stream), "a"),
+                Link(Relation.PARENT, LinkTarget.Event(message), "e"),
+                Link(Relation.MENTION, LinkTarget.Event(threadRoot), "e"),
+                Link(Relation.MENTION, LinkTarget.Event(quoted), "e"),
+                Link(Relation.PARENT_AUTHOR, LinkTarget.User(host), "p"),
+                Link(Relation.MENTION, LinkTarget.User(cited), "p"),
+            ),
+            event.links(),
+        )
+    }
+
+    @Test
     fun chatWithoutARootMarkerIsRootedAtItsFirstActivity() {
         val event = LiveActivitiesChatMessageEvent(id, viewer, 1, arrayOf(arrayOf("a", space), arrayOf("a", stream)), "", sig)
         assertEquals(
@@ -173,7 +206,13 @@ class Nip53LiveActivitiesLinksTest {
                 id,
                 host,
                 1,
-                arrayOf(arrayOf("d", "stream"), arrayOf("p", host, "", "Host"), arrayOf("pinned", message), arrayOf("goal", goal)),
+                arrayOf(
+                    arrayOf("d", "stream"),
+                    arrayOf("p", host, "", "Host"),
+                    arrayOf("pinned", message),
+                    arrayOf("goal", goal),
+                    arrayOf("t", "Music"),
+                ),
                 "",
                 sig,
             )
@@ -182,6 +221,7 @@ class Nip53LiveActivitiesLinksTest {
                 Link(Relation.PARTICIPANT, LinkTarget.User(host), "p", ParticipantProps(listOf("Host"))),
                 Link(Relation.PIN, LinkTarget.Event(message), "pinned"),
                 Link(Relation.GOAL, LinkTarget.Event(goal), "goal"),
+                Link(Relation.HASHTAG, LinkTarget.Tag("t", "music"), "t"),
             ),
             stream.links(),
         )

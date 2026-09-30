@@ -49,6 +49,8 @@ class Nip89AppHandlersLinksTest {
                     arrayOf("d", "1"),
                     arrayOf("a", web, "wss://relay.example/", "web"),
                     arrayOf("a", android, "", ""),
+                    // Not a 31990 handler: NIP-89 recommends only those.
+                    arrayOf("a", "30023:$dev:post", "", "web"),
                 ),
                 "",
                 sig,

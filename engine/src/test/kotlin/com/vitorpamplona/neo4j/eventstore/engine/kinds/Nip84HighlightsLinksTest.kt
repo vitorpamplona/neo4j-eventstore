@@ -24,7 +24,9 @@ import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.RoleProps
+import com.vitorpamplona.quartz.nip19Bech32.toNpub
 import com.vitorpamplona.quartz.nip84Highlights.HighlightEvent
+import com.vitorpamplona.quartz.utils.Hex
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -93,6 +95,31 @@ class Nip84HighlightsLinksTest {
                 Link(Relation.HIGHLIGHTED, LinkTarget.Tag("r", "https://example.com/essay"), "r"),
                 Link(Relation.TAG, LinkTarget.Tag("r", "https://example.com/cited"), "r"),
                 Link(Relation.HIGHLIGHTED, LinkTarget.Tag("i", "isbn:9780765382030"), "i"),
+            ),
+            event.links(),
+        )
+    }
+
+    @Test
+    fun theExcerptCitesAndTheCommentMentions() {
+        // The excerpt is the quoted author's text: its nostr: URI is theirs (CITED), not the
+        // highlighter's MENTION. The comment is the highlighter's own words.
+        val inExcerpt = "c1".repeat(32)
+        val inComment = "c2".repeat(32)
+        val event =
+            HighlightEvent(
+                id,
+                me,
+                1L,
+                arrayOf(arrayOf("comment", "agree with nostr:${Hex.decode(inComment).toNpub()}")),
+                "as nostr:${Hex.decode(inExcerpt).toNpub()} said",
+                sig,
+            )
+
+        assertEquals(
+            listOf(
+                Link(Relation.CITED, LinkTarget.User(inExcerpt), Link.VIA_CONTENT),
+                Link(Relation.MENTION, LinkTarget.User(inComment), Link.VIA_CONTENT),
             ),
             event.links(),
         )

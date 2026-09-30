@@ -50,6 +50,8 @@ class Nip58BadgesLinksTest {
                 1L,
                 arrayOf(
                     arrayOf("a", bravery),
+                    // Not a 30009 definition: no badge.
+                    arrayOf("a", "30023:$issuer:post"),
                     arrayOf("p", awardee, "wss://relay.example/"),
                     arrayOf("p", me),
                 ),

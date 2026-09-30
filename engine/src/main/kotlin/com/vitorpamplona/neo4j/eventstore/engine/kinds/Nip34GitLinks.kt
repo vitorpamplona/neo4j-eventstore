@@ -27,6 +27,7 @@ import com.vitorpamplona.quartz.nip01Core.core.HexKey
 import com.vitorpamplona.quartz.nip01Core.core.TagArray
 import com.vitorpamplona.quartz.nip01Core.tags.aTag.ATag
 import com.vitorpamplona.quartz.nip01Core.tags.events.ETag
+import com.vitorpamplona.quartz.nip01Core.tags.hashtags.HashtagTag
 import com.vitorpamplona.quartz.nip01Core.tags.people.PTag
 import com.vitorpamplona.quartz.nip10Notes.tags.MarkedETag
 import com.vitorpamplona.quartz.nip18Reposts.quotes.QEventTag
@@ -55,7 +56,8 @@ internal fun KindMappers.Builder.nip34Git() {
 
     // NIP-34: the repository (`a`) and its owner's `p`; a series is threaded by marked `e` tags
     // (`reply` points at the previous patch, `root` at the series' first). `t` holds the `root` and
-    // `root-revision` markers and `r` the earliest unique commit.
+    // `root-revision` markers, which say what the patch is (`isRoot()`), not a topic: only other
+    // `t`s are hashtags (compared lowercased, as a hashtag's identity is). `r` is the earliest unique commit.
     on<GitPatchEvent> { e ->
         nip34GitPeopleLinks(e.tags, nip34RepositoryLinks(e.tags))
         each(e.tags, MarkedETag::parseAllThreadTags) {
@@ -65,7 +67,9 @@ internal fun KindMappers.Builder.nip34Git() {
                 else -> event(Relation.MENTION, it, MarkedETag.TAG_NAME)
             }
         }
-        hashtags(e.tags)
+        each(e.tags, HashtagTag::parseLowercase) {
+            if (it != GitPatchEvent.ROOT && it != GitPatchEvent.ROOT_REVISION) tag(Relation.HASHTAG, HashtagTag.TAG_NAME, it)
+        }
         nip34CommitLinks(e.tags)
     }
 

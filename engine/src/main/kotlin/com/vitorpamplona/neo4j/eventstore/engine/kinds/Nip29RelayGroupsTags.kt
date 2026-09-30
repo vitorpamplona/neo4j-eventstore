@@ -25,6 +25,8 @@ package com.vitorpamplona.neo4j.eventstore.engine.kinds
 import com.vitorpamplona.quartz.nip01Core.core.HexKey
 import com.vitorpamplona.quartz.nip01Core.core.has
 import com.vitorpamplona.quartz.nip01Core.core.isValid
+import com.vitorpamplona.quartz.nip01Core.relay.normalizer.RelayUrlNormalizer
+import com.vitorpamplona.quartz.nip29RelayGroups.tags.GroupAdminTag
 import com.vitorpamplona.quartz.utils.ensure
 
 /**
@@ -40,5 +42,27 @@ internal object Nip29ParticipantTag {
         ensure(tag[0] == TAG_NAME) { return null }
         ensure(tag[1].isValid()) { return null }
         return tag[1]
+    }
+}
+
+/**
+ * A NIP-29 `p` with roles, `["p", <pubkey>, <role>…]` (the 39001 admins, the 9000 put-user).
+ * Main's [GroupAdminTag.parse] takes every slot from 2 on as a role, so a client that writes the
+ * NIP-01 relay hint there (`["p", <pubkey>, "wss://relay.x", "admin"]`) grants a role named
+ * `wss://relay.x`. A relay URL in slot 2 is the hint, never a role; blank slots are no role.
+ */
+internal object Nip29RoleTag {
+    const val TAG_NAME = GroupAdminTag.TAG_NAME
+
+    fun parse(tag: Array<String>): GroupAdminTag? {
+        ensure(tag.has(1)) { return null }
+        ensure(tag[0] == TAG_NAME) { return null }
+        ensure(tag[1].length == 64) { return null }
+        val roles =
+            (2 until tag.size).mapNotNull { i ->
+                val slot = tag[i]
+                if (slot.isBlank() || (i == 2 && slot.length > 7 && RelayUrlNormalizer.isRelayUrl(slot))) null else slot
+            }
+        return GroupAdminTag(tag[1], roles)
     }
 }

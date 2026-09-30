@@ -41,10 +41,11 @@ internal fun KindMappers.Builder.nip58Badges() {
         }
     }
 
-    // NIP-58: the `a` is the badge definition being awarded and each `p` a pubkey the issuer
-    // awards it to. NIP-58 defines no `e` on a badge award.
+    // NIP-58: the `a` to a 30009 is the badge definition being awarded and each `p` a pubkey the
+    // issuer awards it to. An `a` to any other kind is no badge, so it is not linked; NIP-58 defines
+    // no `e` on a badge award.
     on<BadgeAwardEvent> { e ->
-        each(e.tags, ATag::parse) { address(Relation.BADGE_DEFINITION, it, ATag.TAG_NAME) }
+        each(e.tags, ATag::parse) { if (it.kind == BadgeDefinitionEvent.KIND) address(Relation.BADGE_DEFINITION, it, ATag.TAG_NAME) }
         each(e.tags, PTag::parse) { user(Relation.AWARDED, it, PTag.TAG_NAME) }
     }
 

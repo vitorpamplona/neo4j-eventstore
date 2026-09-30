@@ -80,6 +80,33 @@ class Nip71VideoLinksTest {
     }
 
     @Test
+    fun aLabelAfterAnEmptyRelaySlotIsStillTheLabel() {
+        // Main's VideoCredits takes the blank slot 2 as the label (then drops it as blank), which
+        // lost the credit: a bare participant, no `e` credit at all, an `a` read as a mention.
+        val audio = "34236:$inspiration:song"
+        val tags =
+            arrayOf(
+                arrayOf("p", inspiration, "", "inspired-by"),
+                arrayOf("p", collaborator, "", "Collaborator"),
+                arrayOf("p", mentioned, "", "mention"),
+                arrayOf("e", cited, "", "audio"),
+                arrayOf("a", audio, "", "audio"),
+                arrayOf("p", participant, ""),
+            )
+        assertEquals(
+            listOf(
+                Link(Relation.CREDITED, LinkTarget.User(inspiration), "p", CreditProps("inspired-by")),
+                Link(Relation.PARTICIPANT, LinkTarget.User(collaborator), "p", ParticipantProps(listOf("Collaborator"))),
+                Link(Relation.MENTION, LinkTarget.User(mentioned), "p"),
+                Link(Relation.CREDITED, LinkTarget.Event(cited), "e", CreditProps("audio")),
+                Link(Relation.CREDITED, LinkTarget.Address(audio), "a", CreditProps("audio")),
+                Link(Relation.PARTICIPANT, LinkTarget.User(participant), "p"),
+            ),
+            VideoNormalEvent(id, author, 1, tags, "", sig).links(),
+        )
+    }
+
+    @Test
     fun textTrackNamesItsVideoAndLanguage() {
         val video = "34236:$author:clip"
         val event =

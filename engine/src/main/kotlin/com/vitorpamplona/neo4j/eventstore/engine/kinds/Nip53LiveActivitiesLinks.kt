@@ -25,6 +25,7 @@ import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.quartz.nip01Core.core.TagArray
 import com.vitorpamplona.quartz.nip01Core.tags.aTag.ATag
+import com.vitorpamplona.quartz.nip01Core.tags.events.ETag
 import com.vitorpamplona.quartz.nip01Core.tags.people.PTag
 import com.vitorpamplona.quartz.nip01Core.tags.references.ReferenceTag
 import com.vitorpamplona.quartz.nip10Notes.tags.MarkedETag
@@ -43,15 +44,20 @@ import com.vitorpamplona.quartz.nip53LiveActivities.streaming.tags.PinnedEventTa
 /** Quartz's `nip53LiveActivities` classes. */
 internal fun KindMappers.Builder.nip53LiveActivities() {
     // NIP-53: the activity's `a` is the chat's ROOT (the spec's example marks it `root`; without a
-    // marker, the first `a`), and an `e` is the message this one replies to.
+    // marker, the first `a`), and the `e` it replies to (`reply()`: the `reply`-marked one, else
+    // the last unmarked one; Quartz writes the marker) is its PARENT. Any other `e` is a MENTION:
+    // a message has one parent, so a `root` + `reply` pair must not give two. The `p` naming the
+    // author the parent tag names (its pubkey slot) is the PARENT_AUTHOR, the rest MENTIONs, as on
+    // kinds 1 and 42.
     on<LiveActivitiesChatMessageEvent> { e ->
         val activities = e.tags.mapNotNull(Nip53ActivityTag::parse)
         val activity = activities.firstOrNull { it.isRoot() } ?: activities.firstOrNull()
         activities.forEach { address(if (it === activity) Relation.ROOT else Relation.MENTION, it.activity, Nip53ActivityTag.TAG_NAME) }
-        each(e.tags, MarkedETag::parseAllThreadTags) {
-            event(if (it.marker == MarkedETag.MARKER.MENTION) Relation.MENTION else Relation.PARENT, it, MarkedETag.TAG_NAME)
-        }
-        each(e.tags, PTag::parse) { user(Relation.MENTION, it, PTag.TAG_NAME) }
+        val parentTag = e.reply()
+        val parentAuthor = parentTag?.author
+        event(Relation.PARENT, parentTag, MarkedETag.TAG_NAME)
+        each(e.tags, ETag::parse) { if (it.eventId != parentTag?.eventId) event(Relation.MENTION, it, ETag.TAG_NAME) }
+        each(e.tags, PTag::parse) { user(if (it.pubKey == parentAuthor) Relation.PARENT_AUTHOR else Relation.MENTION, it, PTag.TAG_NAME) }
         quotes(e.tags)
         hashtags(e.tags)
         contentMentions(e.citedNIP19())
@@ -82,11 +88,13 @@ internal fun KindMappers.Builder.nip53LiveActivities() {
         address(Relation.RAIDED, e.toActivity(), ATag.TAG_NAME)
     }
 
-    // NIP-53: participants with their roles, pinned chat messages, and the NIP-75 zap goal the stream raises toward (zap.stream's `goal`).
+    // NIP-53: participants with their roles, pinned chat messages, the NIP-75 zap goal the stream
+    // raises toward (zap.stream's `goal`), and the stream's `t` topics.
     on<LiveActivitiesEvent> { e ->
         nip53ParticipantLinks(e.tags)
         each(e.tags, PinnedEventTag::parse) { event(Relation.PIN, it, PinnedEventTag.TAG_NAME) }
         each(e.tags, Nip53GoalTag::parse) { event(Relation.GOAL, it, Nip53GoalTag.TAG_NAME) }
+        hashtags(e.tags)
     }
 
     free<NestsServersEvent>()
