@@ -155,7 +155,7 @@ class GraphProjection private constructor(
         val SCHEMA_COUNTS: String =
             run {
                 val labels =
-                    listOf(Labels.EVENT, Labels.STORED, Labels.USER, Labels.ADDRESS, Labels.TAG)
+                    listOf(Labels.EVENT, Labels.DATA, Labels.USER, Labels.ADDRESS, Labels.TAG)
                         .joinToString(", ") { "$it: COUNT { (:$it) }" }
                 val types =
                     Relation.ALL

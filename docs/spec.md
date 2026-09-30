@@ -162,7 +162,7 @@ interface GraphIndex : AutoCloseable {
     suspend fun apply(events: List<Event>)
     /** Unproject these ids (idempotent; the stub rule of §4.1). */
     suspend fun unapply(ids: List<String>)
-    /** (created_at, id) of every :Stored event in [since, until], ascending — the reconciler's side. */
+    /** (created_at, id) of every :Data event in [since, until], ascending — the reconciler's side. */
     suspend fun visitIds(since: Long, until: Long, onPage: suspend (List<IdAndTime>) -> Boolean)
     /** What one event contributed, as derived — debugging and the derivation parity test. */
     suspend fun edgesOf(id: String): List<EdgeView>
@@ -211,7 +211,7 @@ Consequences:
 
 | Label | Key (unique constraint) | Properties | Exists when |
 |---|---|---|---|
-| `:Event:Stored` | `id` | `kind`, `created_at`, `d` (addressables), `expires_at` (NIP-40), curated values (§4.3), `derived` (the derivation stamp, §7.2) | Vespa holds the event |
+| `:Event:Data` | `id` | `kind`, `created_at`, `d` (addressables), `expires_at` (NIP-40), curated values (§4.3), `derived` (the derivation stamp, §7.2) | Vespa holds the event |
 | `:Event` (stub) | `id` | none | Something references an id we do not hold (never seen, excluded, or removed) |
 | `:User` | `pubkey` | none: names stay on the kind 0 that states them (§4.3) | It authored, or was referenced |
 | `:Address` | `id` = `kind:pubkey:d` (Quartz `AddressSerializer` form) | `kind`, `pubkey`, `d` | Any **addressable** event (30000–39999), or a reference to any address, including a replaceable one such as `10002:<pk>:` |
@@ -224,15 +224,15 @@ Consequences:
   convenience (Q6).
 - **Replaceable and addressable events both have an `:Address`** (`3:<pk>:` for a follow list,
   `30023:<pk>:<d>` for an article), reached through their `ADDRESS` edge. It is the NIP-01 slot:
-  a user's current follow list is `(:Address {id: '3:' + $pk + ':'})<-[:ADDRESS]-(list:Stored)`,
+  a user's current follow list is `(:Address {id: '3:' + $pk + ':'})<-[:ADDRESS]-(list:Data)`,
   an index seek, and there is exactly one. *Built (2.0):* 1.x gave replaceables no address and
   found the slot through the kind-typed author edge, which 2.0 no longer has.
 - **Stubs keep references alive.** A reply to a note we never saw still points at
-  `(:Event {id})`. When the note arrives, the stub gains `:Stored`, and the reply's edge is
+  `(:Event {id})`. When the note arrives, the stub gains `:Data`, and the reply's edge is
   already in place.
 - **Unapply** (§6.2):
   1. delete the event's outgoing relationships and its properties;
-  2. drop `:Stored`;
+  2. drop `:Data`;
   3. delete the node if nothing points at it any more, otherwise keep it as a stub.
 
   Every node the unapply leaves without relationships (`:User`, `:Address`, `:Tag`, stubs) is
@@ -242,15 +242,15 @@ Consequences:
 
 **Indexes:**
 - the four uniqueness constraints;
-- range indexes on `:Stored(created_at)` (the reconciler's windows) and `:Stored(kind)`;
-- `:Stored(expires_at)`;
-- `:Stored(nip05)` (kind-0 names), `:Address(kind)`;
+- range indexes on `:Data(created_at)` (the reconciler's windows) and `:Data(kind)`;
+- `:Data(expires_at)`;
+- `:Data(nip05)` (kind-0 names), `:Address(kind)`;
 - relationship indexes on `report` and `report_raw` of `REPORTED_USER`, `REPORTED` and
   `REPORTED_AUTHOR`.
 
 ### 4.2 Relationships
 
-Every relationship **originates at an `:Event:Stored`**, except an address's `AUTHOR`.
+Every relationship **originates at an `:Event:Data`**, except an address's `AUTHOR`.
 Unapplying an event therefore removes exactly its own contribution. No removal style needs
 graph-specific code.
 
@@ -299,7 +299,7 @@ report's category, an assertion's rank, a zap's amount) ride that edge as the re
 | 30023, 30311, 34550 | the event | `title` (≤ 256 bytes) | the `title` tag |
 
 Adding an extractor is an additive schema change. *Built:* it reaches events already held
-through re-derivation (§7.2): every `:Stored` node carries the derivation stamp it was written
+through re-derivation (§7.2): every `:Data` node carries the derivation stamp it was written
 with, and bumping `Derivation.VERSION` with the change makes the reconciler rewrite each held
 event in place, paced by the full sweep. The same holds for a mapper fix or a Quartz bump that
 changes a parse.
@@ -383,7 +383,7 @@ A NIP-10 reply (kind 1, by `A`) with these tags:
 and content `"… nostr:npub1<Y> … nostr:nsec1<Z> …"` projects to:
 
 ```
-(ev:Event:Stored {id, kind:1, created_at})-[:AUTHOR]->(:User {pubkey:A})
+(ev:Event:Data {id, kind:1, created_at})-[:AUTHOR]->(:User {pubkey:A})
 (ev)-[:ROOT {via:"e"}]->(:Event {id:R})
 (ev)-[:PARENT {via:"e"}]->(:Event {id:P})
 (ev)-[:MENTION {via:"p"}]->(:User {pubkey:X})   // PARENT_AUTHOR if X were P's author
@@ -452,7 +452,7 @@ to the event node and its slot anchor (its own `:Address`), taking their locks, 
 processes cannot both win a slot.
 
 **`apply(e)`:**
-1. Already `:Stored` → no-op (idempotent).
+1. Already `:Data` → no-op (idempotent).
 2. If `e` is **replaceable or addressable**, the incumbent is the other `ADDRESS` source on its
    own `:Address` (`kind:pubkey:` or `kind:pubkey:d`).
    - If the incumbent wins under NIP-01 (higher `created_at`, then the lower id), skip `e`: it
@@ -504,7 +504,7 @@ anyway.
 
 Forward the relay's **accepted events** and filter deletes from an `IEventStore` decorator, and
 re-apply NIP-09 / NIP-62 in the projector. The graph makes these cheap:
-- "is this deleted?" is `EXISTS { (:Stored {kind:5})-[:DELETED]->(target) }` with the same
+- "is this deleted?" is `EXISTS { (:Data {kind:5})-[:DELETED]->(target) }` with the same
   author;
 - vanish is an author-scoped unapply.
 
@@ -537,7 +537,7 @@ serves Cypher hydration (§8.3).
 
 For a `created_at` window, the reconciler streams both sides in `(created_at, id)` order:
 - Vespa, filtered to policy-included kinds;
-- Neo4j `:Stored`.
+- Neo4j `:Data`.
 
 *Built:* the graph side is listed FIRST. Listed after the source, an event the source acked and
 the feed applied between the two listings looked extra and was unapplied. In this order that race
@@ -562,7 +562,7 @@ local rule can see:
 - with unreported (atomic) supersession, a stale version delivered after its successor was
   itself removed, so the slot looks empty.
 
-*Built:* **re-derivation.** Every `:Stored` node carries `derived`, the stamp of the derivation
+*Built:* **re-derivation.** Every `:Data` node carries `derived`, the stamp of the derivation
 that wrote it (`Derivation.stamp`: the schema major, `Derivation.VERSION` and the policy hash).
 The graph listing returns it, and a held event whose stamp is not the running build's is fetched
 and rewritten in place (`GraphIndex.rederive`: one transaction, old edges unapplied while
@@ -691,7 +691,7 @@ Parameters are passed natively. Nothing is string-interpolated.
 Rows are streamed as `{"columns":[…], "rows":[[…]], "elapsedMs":n}`. Graph values serialize by
 label:
 
-- `:Event:Stored` becomes the **full NIP-01 event**, fetched from Vespa by id in batched
+- `:Event:Data` becomes the **full NIP-01 event**, fetched from Vespa by id in batched
   `SourceOfTruth.fetch` calls (`hydrate: true`, the default). With `hydrate: false`, it is the
   node's properties.
   - An event Vespa removed between the Cypher read and the fetch comes back as
@@ -759,42 +759,42 @@ These are also `ReferenceQueriesIT`, run against a fixture graph with known answ
 // T1 — follower count (O(1) from the dense-node group) and the followers
 MATCH (u:User {pubkey: $pk})
 RETURN COUNT { (u)<-[:FOLLOW]-() } AS followers;
-MATCH (:User {pubkey: $pk})<-[:FOLLOW]-(:Stored)-[:AUTHOR]->(f:User) RETURN f;
+MATCH (:User {pubkey: $pk})<-[:FOLLOW]-(:Data)-[:AUTHOR]->(f:User) RETURN f;
 
 // T2 — follows-of-follows I don't follow, ranked by how many of my follows follow them.
 // A user's current follow list is their `3:<pk>:` address's one version: an index seek.
-MATCH (:Address {id: '3:' + $me + ':'})<-[:ADDRESS]-(mine:Stored)-[:FOLLOW]->(f:User)
-MATCH (:Address {id: '3:' + f.pubkey + ':'})<-[:ADDRESS]-(:Stored)-[:FOLLOW]->(fof:User)
+MATCH (:Address {id: '3:' + $me + ':'})<-[:ADDRESS]-(mine:Data)-[:FOLLOW]->(f:User)
+MATCH (:Address {id: '3:' + f.pubkey + ':'})<-[:ADDRESS]-(:Data)-[:FOLLOW]->(fof:User)
 WHERE fof.pubkey <> $me AND NOT EXISTS { (mine)-[:FOLLOW]->(fof) }
 RETURN fof, count(DISTINCT f) AS via ORDER BY via DESC LIMIT 50;
 
 // T3 — the whole NIP-10 thread under a root (every reply tags the root)
-MATCH (root:Event {id: $id})<-[:ROOT]-(n:Stored)
+MATCH (root:Event {id: $id})<-[:ROOT]-(n:Data)
 RETURN n ORDER BY n.created_at;
 
 // T3b — the reply TREE, any depth, following PARENT edges
-MATCH (root:Event {id: $id}) ((p)<-[:PARENT]-(c:Stored))+ (leaf)
+MATCH (root:Event {id: $id}) ((p)<-[:PARENT]-(c:Data))+ (leaf)
 RETURN leaf;
 
 // T5 — notes my follows zapped this week, by total sats
-MATCH (:Address {id: '3:' + $me + ':'})<-[:ADDRESS]-(:Stored)-[:FOLLOW]->(f:User)
-MATCH (f)<-[:ZAP_SENDER]-(z:Stored)-[:ZAPPED]->(n:Stored {kind: 1})
+MATCH (:Address {id: '3:' + $me + ':'})<-[:ADDRESS]-(:Data)-[:FOLLOW]->(f:User)
+MATCH (f)<-[:ZAP_SENDER]-(z:Data)-[:ZAPPED]->(n:Data {kind: 1})
 WHERE z.created_at >= $since
 RETURN n, sum(z.msats) AS msats, count(DISTINCT f) AS zappers ORDER BY msats DESC LIMIT 50;
 
 // T9 — who NIP-85 provider S ranks >= 80
-MATCH (:User {pubkey: $service})<-[:AUTHOR]-(:Stored {kind: 30382})-[a:SUBJECT]->(u:User)
+MATCH (:User {pubkey: $service})<-[:AUTHOR]-(:Data {kind: 30382})-[a:SUBJECT]->(u:User)
 WHERE a.rank >= 80
 RETURN u, a.rank ORDER BY a.rank DESC;
 
 // T11 — hashtags used alongside #bitcoin in the last day
-MATCH (:Tag {key: 't:bitcoin'})<-[:HASHTAG]-(n:Stored)-[:HASHTAG]->(o:Tag)
+MATCH (:Tag {key: 't:bitcoin'})<-[:HASHTAG]-(n:Data)-[:HASHTAG]->(o:Tag)
 WHERE n.created_at >= $since AND o.key <> 't:bitcoin'
 RETURN o.value, count(*) AS uses ORDER BY uses DESC LIMIT 20;
 
 // Hybrid — full-text search in Vespa first (ids from a NIP-50 REQ), then graph in Cypher
 UNWIND $ids AS id
-MATCH (n:Event:Stored {id: id})<-[:REACTED]-(:Stored)-[:AUTHOR]->(r:User)
+MATCH (n:Event:Data {id: id})<-[:REACTED]-(:Data)-[:AUTHOR]->(r:User)
 RETURN n, count(DISTINCT r) AS reactors ORDER BY reactors DESC;
 ```
 

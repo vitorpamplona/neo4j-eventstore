@@ -69,10 +69,10 @@ class GraphProjectionIT {
             val types = schema["relationship_types"] as JsonObject
             val counts =
                 driver.session().use { s ->
-                    s.run("MATCH (n:Stored) RETURN count(n) AS stored").single()["stored"].asLong() to
+                    s.run("MATCH (n:Data) RETURN count(n) AS stored").single()["stored"].asLong() to
                         s.run("MATCH ()-[r:AUTHOR]->() RETURN count(r) AS c").single()["c"].asLong()
                 }
-            assertEquals(counts.first, labels["Stored"]!!.jsonPrimitive.long)
+            assertEquals(counts.first, labels["Data"]!!.jsonPrimitive.long)
             assertEquals(counts.second, types["AUTHOR"]!!.jsonPrimitive.long)
             assertTrue(types.values.all { it.jsonPrimitive.long > 0 }, "a type with no edges is absent")
             assertEquals(SchemaInstaller.SCHEMA_VERSION, schema["schema_version"]!!.jsonPrimitive.content)

@@ -125,8 +125,8 @@ class ReferenceQueriesIT {
                 rows(
                     cypher,
                     """
-                    MATCH (:Address {id: '3:' + ${'$'}me + ':'})<-[:ADDRESS]-(mine:Stored)-[:FOLLOW]->(f:User)
-                    MATCH (:Address {id: '3:' + f.pubkey + ':'})<-[:ADDRESS]-(:Stored)-[:FOLLOW]->(fof:User)
+                    MATCH (:Address {id: '3:' + ${'$'}me + ':'})<-[:ADDRESS]-(mine:Data)-[:FOLLOW]->(f:User)
+                    MATCH (:Address {id: '3:' + f.pubkey + ':'})<-[:ADDRESS]-(:Data)-[:FOLLOW]->(fof:User)
                     WHERE fof.pubkey <> ${'$'}me AND NOT EXISTS { (mine)-[:FOLLOW]->(fof) }
                     RETURN fof.pubkey AS pk, count(DISTINCT f) AS via ORDER BY via DESC, pk
                     """.trimIndent(),
@@ -138,7 +138,7 @@ class ReferenceQueriesIT {
             val t3 =
                 rows(
                     cypher,
-                    "MATCH (root:Event {id: \$id})<-[:ROOT]-(n:Stored) RETURN n ORDER BY n.created_at",
+                    "MATCH (root:Event {id: \$id})<-[:ROOT]-(n:Data) RETURN n ORDER BY n.created_at",
                     mapOf("id" to n1.id),
                 )
             assertEquals(
@@ -154,7 +154,7 @@ class ReferenceQueriesIT {
             val t3b =
                 rows(
                     cypher,
-                    "MATCH (root:Event {id: \$id}) ((p)<-[:PARENT]-(c:Stored))+ (leaf) RETURN leaf.id AS id",
+                    "MATCH (root:Event {id: \$id}) ((p)<-[:PARENT]-(c:Data))+ (leaf) RETURN leaf.id AS id",
                     mapOf("id" to n1.id),
                 )
             assertEquals(setOf(r1.id, r2.id), t3b.map { it.jsonArray[0].jsonPrimitive.content }.toSet())
@@ -164,7 +164,7 @@ class ReferenceQueriesIT {
                 rows(
                     cypher,
                     """
-                    MATCH (zapper:User {pubkey: ${'$'}zapper})<-[:ZAP_SENDER]-(z:Stored)-[:ZAPPED]->(n:Stored {kind: 1})
+                    MATCH (zapper:User {pubkey: ${'$'}zapper})<-[:ZAP_SENDER]-(z:Data)-[:ZAPPED]->(n:Data {kind: 1})
                     RETURN n.id AS id, count(z) AS zaps
                     """.trimIndent(),
                     mapOf("zapper" to f1),
@@ -175,7 +175,7 @@ class ReferenceQueriesIT {
             val t9 =
                 rows(
                     cypher,
-                    "MATCH (:User {pubkey: \$s})<-[:AUTHOR]-(:Stored {kind: 30382})-[a:SUBJECT]->(u:User) WHERE a.rank >= 80 RETURN u.pubkey AS pk, a.rank AS rank",
+                    "MATCH (:User {pubkey: \$s})<-[:AUTHOR]-(:Data {kind: 30382})-[a:SUBJECT]->(u:User) WHERE a.rank >= 80 RETURN u.pubkey AS pk, a.rank AS rank",
                     mapOf("s" to service),
                 )
             assertEquals(listOf(x to 91L), t9.map { it.jsonArray[0].jsonPrimitive.content to it.jsonArray[1].jsonPrimitive.long })
@@ -184,7 +184,7 @@ class ReferenceQueriesIT {
             val t11 =
                 rows(
                     cypher,
-                    "MATCH (:Tag {key: 't:bitcoin'})<-[:HASHTAG]-(n:Stored)-[:HASHTAG]->(o:Tag) WHERE o.key <> 't:bitcoin' RETURN o.value AS tag ORDER BY tag",
+                    "MATCH (:Tag {key: 't:bitcoin'})<-[:HASHTAG]-(n:Data)-[:HASHTAG]->(o:Tag) WHERE o.key <> 't:bitcoin' RETURN o.value AS tag ORDER BY tag",
                 )
             assertEquals(listOf("art", "nostr"), t11.map { it.jsonArray[0].jsonPrimitive.content })
 
@@ -192,7 +192,7 @@ class ReferenceQueriesIT {
             val hybrid =
                 rows(
                     cypher,
-                    "UNWIND \$ids AS id MATCH (n:Event:Stored {id: id})<-[:REACTED]-(:Stored)-[:AUTHOR]->(r:User) RETURN n.id AS id, count(DISTINCT r) AS reactors",
+                    "UNWIND \$ids AS id MATCH (n:Event:Data {id: id})<-[:REACTED]-(:Data)-[:AUTHOR]->(r:User) RETURN n.id AS id, count(DISTINCT r) AS reactors",
                     mapOf("ids" to listOf(n1.id, n2.id)),
                 )
             assertEquals(listOf(n2.id to 1L), hybrid.map { it.jsonArray[0].jsonPrimitive.content to it.jsonArray[1].jsonPrimitive.long })
@@ -202,7 +202,7 @@ class ReferenceQueriesIT {
                 rows(
                     cypher,
                     """
-                    MATCH (:User {pubkey: ${'$'}x})<-[r:REPORTED_USER]-(:Stored)-[:AUTHOR]->(reporter:User)
+                    MATCH (:User {pubkey: ${'$'}x})<-[r:REPORTED_USER]-(:Data)-[:AUTHOR]->(reporter:User)
                     RETURN reporter.pubkey AS pk, r.report AS type
                     """.trimIndent(),
                     mapOf("x" to x),
@@ -221,7 +221,7 @@ class ReferenceQueriesIT {
                 rows(
                     cypher,
                     """
-                    MATCH (u:User)<-[r:REPORTED_USER|REPORTED_AUTHOR]-(:Stored)
+                    MATCH (u:User)<-[r:REPORTED_USER|REPORTED_AUTHOR]-(:Data)
                     WHERE r.report IN ['impersonation', 'spam', 'illegal', 'malware']
                     RETURN u.pubkey AS pk, collect(r.report) AS types ORDER BY pk
                     """.trimIndent(),
@@ -236,7 +236,7 @@ class ReferenceQueriesIT {
                             }
                     }.toSet(),
             )
-            val swearing = rows(cypher, "MATCH ()-[r:REPORTED {report_raw: 'swearing'}]->(n:Stored) RETURN n.id AS id")
+            val swearing = rows(cypher, "MATCH ()-[r:REPORTED {report_raw: 'swearing'}]->(n:Data) RETURN n.id AS id")
             assertEquals(listOf(n1.id), swearing.map { it.jsonArray[0].jsonPrimitive.content })
 
             // A report query not anchored on one user seeks the relationship index, not every edge.
@@ -258,7 +258,7 @@ class ReferenceQueriesIT {
             assertTrue(audited.single().startsWith("rejected"), "$audited")
 
             // Without hydration a held event is its node properties.
-            val (_, raw) = cypher.query(CypherRequest("MATCH (n:Event:Stored {id: \$id}) RETURN n", mapOf("id" to n1.id), hydrate = false))
+            val (_, raw) = cypher.query(CypherRequest("MATCH (n:Event:Data {id: \$id}) RETURN n", mapOf("id" to n1.id), hydrate = false))
             val node =
                 Json
                     .parseToJsonElement(raw)

@@ -22,12 +22,12 @@ package com.vitorpamplona.neo4j.eventstore.engine.schema
 
 /**
  * What a held event's projection was DERIVED with, so a graph can tell which of its events an
- * older build wrote and re-derive them (spec §7.2). An event already `:Stored` is never re-applied
+ * older build wrote and re-derive them (spec §7.2). An event already `:Data` is never re-applied
  * — a put of it is a duplicate, and the reconciler diffs id sets — so without this a mapper fix,
  * a Quartz bump that changes a parse, or a new extractor would reach only events applied after it
  * ships.
  *
- * Every `:Stored` node carries the [stamp] it was written with (property [PROPERTY]); `:Meta`
+ * Every `:Data` node carries the [stamp] it was written with (property [PROPERTY]); `:Meta`
  * records the stamp the graph is being converged to. The reconciler re-derives, in place, every
  * held event whose stamp differs from the running build's, paced by the full sweep's budget.
  */
@@ -51,7 +51,7 @@ object Derivation {
      */
     const val VERSION: Int = 1
 
-    /** The `:Stored` node property (and the `:Meta` one) holding a [stamp]. */
+    /** The `:Data` node property (and the `:Meta` one) holding a [stamp]. */
     const val PROPERTY = "derived"
 
     /** The schema MAJOR of a version string (`"2.0"` → 2); null when it is not one. */

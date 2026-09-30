@@ -106,11 +106,11 @@ class SchemaInstaller(
                 "CREATE CONSTRAINT tag_key IF NOT EXISTS FOR (n:${Labels.TAG}) REQUIRE n.${Labels.TAG_KEY} IS UNIQUE",
                 "CREATE CONSTRAINT removed_id IF NOT EXISTS FOR (n:${Labels.REMOVED}) REQUIRE n.id IS UNIQUE",
                 // The reconciler's (created_at, id) windows.
-                "CREATE INDEX stored_created_at IF NOT EXISTS FOR (n:${Labels.STORED}) ON (n.created_at)",
-                "CREATE INDEX stored_kind IF NOT EXISTS FOR (n:${Labels.STORED}) ON (n.kind)",
-                "CREATE INDEX stored_expires_at IF NOT EXISTS FOR (n:${Labels.STORED}) ON (n.expires_at)",
+                "CREATE INDEX data_created_at IF NOT EXISTS FOR (n:${Labels.DATA}) ON (n.created_at)",
+                "CREATE INDEX data_kind IF NOT EXISTS FOR (n:${Labels.DATA}) ON (n.kind)",
+                "CREATE INDEX data_expires_at IF NOT EXISTS FOR (n:${Labels.DATA}) ON (n.expires_at)",
                 // "Who is alice@example.com": NIP-05 names live on the kind 0 that states them.
-                "CREATE INDEX stored_nip05 IF NOT EXISTS FOR (n:${Labels.STORED}) ON (n.nip05)",
+                "CREATE INDEX data_nip05 IF NOT EXISTS FOR (n:${Labels.DATA}) ON (n.nip05)",
                 // "Every long-form article address", "every community": an address is keyed by
                 // its id, and without this a kind filter scans every address.
                 "CREATE INDEX address_kind IF NOT EXISTS FOR (n:${Labels.ADDRESS}) ON (n.kind)",

@@ -110,7 +110,7 @@ text(
 
 # ---------------------------------------------------------------- core model
 UX, UY = 330, 430  # User
-EX, EY = 980, 430  # Event:Stored
+EX, EY = 980, 430  # Event:Data
 AX, AY = 980, 760  # own Address
 R = 58
 
@@ -118,7 +118,7 @@ node(UX, UY, R, "User", caption=None)
 props(UX - R - 14, UY - 4, ["pubkey:"], anchor="end")
 text(UX - R - 14, UY + 22, "(names: on its kind 0, via 0:pubkey:)", size=12, anchor="end", fill="#555", italic=True)
 
-node(EX, EY, R, "Event", label="Event:Stored")
+node(EX, EY, R, "Event", label="Event:Data")
 props(
     EX, EY - R - 169,
     ["id:", "kind:", "created_at:", "d:  (addressable kinds)", "expires_at:  (NIP-40)", "derived:  (derivation stamp)",
@@ -138,7 +138,7 @@ edge(AX, AY, R, UX, UY, R, "AUTHOR", ["its pubkey"], t=0.45)
 # targets of the event's statements
 TX = 1620
 targets = [
-    (TX, 190, "Event", "Event:Stored", False, "PARENT", ["via: e"]),
+    (TX, 190, "Event", "Event:Data", False, "PARENT", ["via: e"]),
     (TX, 365, "Stub", "Event", True, "MENTION", ["via: content"]),
     (TX, 540, "User", "User", False, "REPORTED_USER", ["report: impersonation", "report_raw: …, via: p"]),
     (TX, 715, "Address", "Address", False, "QUOTE", ["via: q"]),
@@ -160,7 +160,7 @@ out.append(f'<rect x="{LX}" y="{LY}" width="480" height="610" rx="14" fill="#F6F
 text(LX + 20, LY + 38, "Rules", size=20, weight="bold", anchor="start")
 rules = [
     "Every relationship starts at an",
-    ":Event:Stored — except an",
+    ":Event:Data — except an",
     "address's AUTHOR (its pubkey).",
     "",
     "The type is the relation name:",
@@ -310,7 +310,7 @@ panel(3, 1, "Topics and tags any kind may carry", [
 # node legend strip (top)
 ly = 128
 x = 40
-for kind, name in [("User", ":User"), ("Event", ":Event:Stored"), ("Stub", ":Event (stub)"), ("Address", ":Address"), ("Tag", ":Tag")]:
+for kind, name in [("User", ":User"), ("Event", ":Event:Data"), ("Stub", ":Event (stub)"), ("Address", ":Address"), ("Tag", ":Tag")]:
     dash = ' stroke-dasharray="4 3"' if kind == "Stub" else ""
     out.append(f'<circle cx="{x + 10}" cy="{ly - 6}" r="10" fill="{COL[kind]}" stroke="#111" stroke-width="2"{dash}/>')
     text(x + 28, ly, name, size=16, anchor="start")

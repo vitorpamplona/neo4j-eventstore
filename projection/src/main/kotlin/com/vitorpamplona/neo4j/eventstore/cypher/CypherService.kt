@@ -41,7 +41,7 @@ import java.security.MessageDigest
 
 /**
  * Runs callers' read-only Cypher against the projection (spec §8): [CypherGuard] first, then a
- * READ transaction on the data database, streaming rows as JSON with `:Event:Stored` nodes
+ * READ transaction on the data database, streaming rows as JSON with `:Event:Data` nodes
  * hydrated from the source of truth.
  *
  * NO resource limits in v1 (spec §8.2 layer 4): no timeout, row, byte or memory cap. A heavy
@@ -249,7 +249,7 @@ class CypherService(
         into: MutableSet<String>,
     ) {
         when (value) {
-            is Node -> if (value.hasLabel(Labels.STORED)) (value.asMap()[Labels.EVENT_KEY] as? String)?.let { into += it }
+            is Node -> if (value.hasLabel(Labels.DATA)) (value.asMap()[Labels.EVENT_KEY] as? String)?.let { into += it }
             is Path -> value.nodes().forEach { collectStoredIds(it, into) }
             is List<*> -> value.forEach { collectStoredIds(it, into) }
             is Map<*, *> -> value.values.forEach { collectStoredIds(it, into) }
@@ -269,7 +269,7 @@ class CypherService(
 }
 
 /**
- * Graph values → JSON (spec §8.3). `:Event:Stored` nodes become full NIP-01 events when
+ * Graph values → JSON (spec §8.3). `:Event:Data` nodes become full NIP-01 events when
  * [events] holds them (hydrated), `{"id", "stored": false}` when the source no longer does;
  * other nodes are their properties keyed by label; integers beyond ±2^53 become strings so no
  * JavaScript client silently rounds them.
@@ -317,7 +317,7 @@ class ResultEncoder(
     private fun node(n: Node): JsonElement {
         val props = n.asMap()
         return when {
-            n.hasLabel(Labels.EVENT) && n.hasLabel(Labels.STORED) -> {
+            n.hasLabel(Labels.EVENT) && n.hasLabel(Labels.DATA) -> {
                 val id = props[Labels.EVENT_KEY] as String
                 when {
                     events == null -> JsonObject(props(props) + ("stored" to JsonPrimitive(true)))

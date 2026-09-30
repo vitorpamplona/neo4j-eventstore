@@ -145,7 +145,7 @@ class CypherGuardIT {
             Neo4jGraphIndex(driver).apply((0 until 30).map { corpus.next() })
             val service = CypherService(driver)
             for (q in listOf(
-                "MATCH (n:Event:Stored) RETURN count(n) AS n",
+                "MATCH (n:Event:Data) RETURN count(n) AS n",
                 "CALL db.labels() YIELD label RETURN label",
                 "CALL db.relationshipTypes()",
             )) {

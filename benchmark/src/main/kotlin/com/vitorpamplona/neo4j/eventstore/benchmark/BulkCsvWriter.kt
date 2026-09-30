@@ -97,7 +97,7 @@ class BulkCsvWriter(
                     q(p["name"] as String?),
                     q(p["display_name"] as String?),
                     q(p["nip05"] as String?),
-                    "${Labels.EVENT};${Labels.STORED}",
+                    "${Labels.EVENT};${Labels.DATA}",
                 ).joinToString(","),
             )
             newLine()
@@ -209,7 +209,7 @@ class BulkCsvWriter(
             ":START_ID(Event),:END_ID(%s),:TYPE," + EDGE_COLUMNS.joinToString(",") { (name, type) -> "$name:${type.csv}" }
 
         // Files without a `:LABEL` column get their label on the command line (events carry
-        // theirs per row: held ones are Event;Stored, stubs just Event).
+        // theirs per row: held ones are Event;Data, stubs just Event).
         private val LABEL_OF = mapOf(USERS to Labels.USER, ADDRESSES to Labels.ADDRESS, TAGS to Labels.TAG)
     }
 }

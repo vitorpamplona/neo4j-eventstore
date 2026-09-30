@@ -23,7 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.cypher
 import com.vitorpamplona.quartz.nip01Core.core.Event
 
 /**
- * Where full events come from: the graph holds no bodies, so an `:Event:Stored` a query returns
+ * Where full events come from: the graph holds no bodies, so an `:Event:Data` a query returns
  * is fetched from the source of truth by id (spec §8.3). vespa-relay implements it over the
  * Vespa store it already has.
  */

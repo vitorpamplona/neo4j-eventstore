@@ -139,7 +139,7 @@ class Neo4jGraphIndex(
                     SET e.__lock = true REMOVE e.__lock
                     WITH e
                     OPTIONAL MATCH (r:${Labels.REMOVED} {id: ${'$'}id})
-                    RETURN e:${Labels.STORED} AS stored, r.at AS removedAt
+                    RETURN e:${Labels.DATA} AS stored, r.at AS removedAt
                     """.trimIndent(),
                     mapOf("id" to doc.id),
                 ).single()
@@ -226,7 +226,7 @@ class Neo4jGraphIndex(
                     ON CREATE SET a.kind = ${'$'}kind, a.pubkey = ${'$'}pubkey, a.d = ${'$'}d
                     SET a.__lock = true REMOVE a.__lock
                     WITH a
-                    OPTIONAL MATCH (a)<-[:$ADDRESS]-(old:${Labels.STORED})
+                    OPTIONAL MATCH (a)<-[:$ADDRESS]-(old:${Labels.DATA})
                     WHERE old.${Labels.EVENT_KEY} <> ${'$'}id
                     RETURN old.${Labels.EVENT_KEY} AS id, old.created_at AS createdAt
                     ORDER BY createdAt DESC, id ASC
@@ -257,7 +257,7 @@ class Neo4jGraphIndex(
         params["id"] = doc.id
         params["props"] = InMemoryGraphIndex.eventProps(doc, stamp)
         val cypher = StringBuilder()
-        cypher.append("MATCH (e:${Labels.EVENT} {${Labels.EVENT_KEY}: \$id}) SET e:${Labels.STORED}, e += \$props ")
+        cypher.append("MATCH (e:${Labels.EVENT} {${Labels.EVENT_KEY}: \$id}) SET e:${Labels.DATA}, e += \$props ")
         cypher.append("WITH e OPTIONAL MATCH (r:${Labels.REMOVED} {id: \$id}) DELETE r WITH e ")
 
         // Groups in one fixed order and each group's rows by target key: every hub lock this
@@ -370,7 +370,7 @@ class Neo4jGraphIndex(
         // Lock it, and learn whether it is held at all.
         tx
             .run(
-                "MATCH (e:${Labels.EVENT}:${Labels.STORED} {${Labels.EVENT_KEY}: \$id}) " +
+                "MATCH (e:${Labels.EVENT}:${Labels.DATA} {${Labels.EVENT_KEY}: \$id}) " +
                     "SET e.__lock = true REMOVE e.__lock RETURN e.${Labels.EVENT_KEY} AS id",
                 mapOf("id" to id),
             ).list()
@@ -379,11 +379,11 @@ class Neo4jGraphIndex(
             tx
                 .run(
                     """
-                    MATCH (e:${Labels.EVENT}:${Labels.STORED} {${Labels.EVENT_KEY}: ${'$'}id})
+                    MATCH (e:${Labels.EVENT}:${Labels.DATA} {${Labels.EVENT_KEY}: ${'$'}id})
                     OPTIONAL MATCH (e)-[r]->(t)
                     WITH e, collect(r) AS rels, collect(DISTINCT t) AS targets
                     FOREACH (x IN rels | DELETE x)
-                    REMOVE e:${Labels.STORED}
+                    REMOVE e:${Labels.DATA}
                     SET e = {${Labels.EVENT_KEY}: ${'$'}id}
                     WITH e, targets
                     CALL (e) { WITH e WHERE NOT ${'$'}keepSelf AND NOT EXISTS { (e)<--() } DELETE e }
@@ -433,7 +433,7 @@ class Neo4jGraphIndex(
         val condition =
             when (kind) {
                 // A HELD event is never dropped for lack of references; a user also has no outgoing edges.
-                NodeKind.EVENT -> "NOT t:${Labels.STORED} AND NOT EXISTS { (t)<--() }"
+                NodeKind.EVENT -> "NOT t:${Labels.DATA} AND NOT EXISTS { (t)<--() }"
 
                 NodeKind.USER -> "NOT EXISTS { (t)--() }"
 
@@ -479,7 +479,7 @@ class Neo4jGraphIndex(
                             tx
                                 .run(
                                     """
-                                    MATCH (e:${Labels.STORED})
+                                    MATCH (e:${Labels.DATA})
                                     WHERE e.created_at >= ${'$'}from AND e.created_at <= ${'$'}until
                                       AND (${'$'}first OR e.created_at > ${'$'}ca OR (e.created_at = ${'$'}ca AND e.${Labels.EVENT_KEY} > ${'$'}id))
                                     RETURN e.created_at AS ca, e.${Labels.EVENT_KEY} AS id, coalesce(e.${Derivation.PROPERTY}, 0) AS derived
@@ -515,7 +515,7 @@ class Neo4jGraphIndex(
                     val rows =
                         tx
                             .run(
-                                "MATCH (e:${Labels.EVENT}:${Labels.STORED} {${Labels.EVENT_KEY}: \$id}) " +
+                                "MATCH (e:${Labels.EVENT}:${Labels.DATA} {${Labels.EVENT_KEY}: \$id}) " +
                                     "OPTIONAL MATCH (e)-[r]->(t) " +
                                     "RETURN type(r) AS type, labels(t) AS labels, " +
                                     "coalesce(t.${Labels.EVENT_KEY}, t.${Labels.USER_KEY}, t.${Labels.TAG_KEY}) AS key, " +
@@ -573,7 +573,7 @@ class Neo4jGraphIndex(
                                 val (_, keyProp) = labelAndKey(kind)
                                 val props = normalize(rec["props"]).toMutableMap()
                                 val key = props.remove(keyProp) as String
-                                NodeView(kind.label, key, Labels.STORED in labels, props)
+                                NodeView(kind.label, key, Labels.DATA in labels, props)
                             }.toSet()
                     val edges =
                         tx

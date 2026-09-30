@@ -77,7 +77,7 @@ class SchemaInstallerIT {
         }
         assertTrue("Address" to listOf("kind") in indexed)
         // NIP-05 names live on the kind 0, not on the `:User`.
-        assertTrue("Stored" to listOf("nip05") in indexed, "$indexed")
+        assertTrue("Data" to listOf("nip05") in indexed, "$indexed")
         assertTrue("User" to listOf("nip05") !in indexed, "$indexed")
         driver.close()
     }

@@ -29,11 +29,13 @@ object Labels {
     const val EVENT = "Event"
 
     /**
-     * Added to an [EVENT] the source of truth currently holds. A node without it is a STUB: an id
-     * something references but the projection does not hold (never seen, or removed) — kept so
-     * the reference survives and a later arrival lands on it.
+     * Added to an [EVENT] the source of truth currently holds: the event's data is attached to its
+     * id. A node without it is a STUB: an id something references but the projection does not
+     * hold (never seen, or removed) — kept so the reference survives and a later arrival lands on
+     * it. The `:Event` node is the id, as an `:Address` is the slot; an id names one event
+     * forever, so its data rides the same node instead of hanging off it as a slot's versions do.
      */
-    const val STORED = "Stored"
+    const val DATA = "Data"
 
     const val USER = "User"
     const val ADDRESS = "Address"

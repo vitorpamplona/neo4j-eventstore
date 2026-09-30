@@ -73,7 +73,7 @@ interface GraphIndex : AutoCloseable {
     suspend fun rederive(events: List<Event>): ApplyOutcome
 
     /**
-     * Every held (`:Stored`) event with `created_at` in `[since, until]`, ascending by
+     * Every held (`:Data`) event with `created_at` in `[since, until]`, ascending by
      * (created_at, id), in pages, each with the derivation stamp it was written with — the
      * reconciler's side of the diff. [onPage] returns whether to continue.
      */
@@ -148,7 +148,7 @@ data class EdgeView(
     val props: Map<String, Any>,
 )
 
-/** A node, normalized: its primary label, key, whether it is `:Stored` (events), and properties. */
+/** A node, normalized: its primary label, key, whether it is `:Data` (events), and properties. */
 data class NodeView(
     val label: String,
     val key: String,
