@@ -22,9 +22,11 @@ package com.vitorpamplona.neo4j.eventstore.engine.derive
 
 import com.vitorpamplona.neo4j.eventstore.engine.kinds.KindLinks
 import com.vitorpamplona.neo4j.eventstore.engine.schema.GraphPolicy
+import com.vitorpamplona.neo4j.eventstore.engine.schema.hashedD
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
+import com.vitorpamplona.quartz.nip01Core.core.Address
 import com.vitorpamplona.quartz.nip01Core.core.Event
 import com.vitorpamplona.quartz.nip01Core.core.isAddressable
 import com.vitorpamplona.quartz.utils.EventFactory
@@ -50,12 +52,18 @@ class EdgeDeriver(
         val secrets = Secrets.inContent(event.content)
 
         val edges = ArrayList<EdgeDoc>()
+        var ownDLeaked = false
         for (link in KindLinks.of(event)) {
-            val target = nodeRef(link.target) ?: continue
+            var target = nodeRef(link.target) ?: continue
             if (target.kind == NodeKind.EVENT && target.key == event.id) continue
-            // The ADDRESS edge is the event's own slot: its key is the event's pubkey and `d`,
-            // never a pasted secret, and the slot must exist for supersession to work.
-            if (link.relation != Relation.ADDRESS && Secrets.leaks(target.key, secrets)) continue
+            if (Secrets.leaks(target.key, secrets)) {
+                // The event's own slot must survive (supersession depends on it), but its `d` is
+                // free author text: a leaked key there joins by the hash of that `d` instead.
+                if (link.relation != Relation.ADDRESS) continue
+                val key = AddressKey.parse(target.key) ?: continue
+                target = NodeRef(NodeKind.ADDRESS, Address.assemble(key.kind, key.pubkey, hashedD(key.d)))
+                ownDLeaked = true
+            }
             val props = storeProps(link, secrets) ?: continue
             edges.add(EdgeDoc(link.relation.name, target, props))
         }
@@ -64,21 +72,28 @@ class EdgeDeriver(
         // The slot is the ADDRESS link the vocabulary emitted, so it is validated exactly as the
         // edge is: an event whose own address is malformed (a non-hex pubkey) competes for none.
         val slot = edges.firstOrNull { it.type == Relation.ADDRESS.name }?.let { Slot(it.target.key) }
-        if (slot != null && event.kind.isAddressable()) {
+        if (slot != null && event.kind.isAddressable() && !ownDLeaked) {
             AddressKey.parse(slot.address)?.let { nodeProps[D] = it.d }
         }
         expiration(event.tags)?.let { nodeProps[EXPIRES_AT] = it }
-        nodeProps.putAll(Extractors.nodeValues(event, policy))
+        // Curated text is author-written too: the nsec rule covers it like any key or prop.
+        val authorValues = Extractors.authorValues(event, policy)?.filterValues { !Secrets.leaks(it, secrets) }
+        Extractors.nodeValues(event, policy, authorValues).forEach { (k, v) ->
+            if (v !is String || !Secrets.leaks(v, secrets)) nodeProps[k] = v
+        }
+        // The author's key as its AUTHOR edge holds it (lowercased); an invalid one has no
+        // edge, so there is no `:User` to carry names.
+        val author = edges.firstOrNull { it.type == Relation.AUTHOR.name }?.target?.key
 
         return GraphDoc(
             id = event.id,
             kind = event.kind,
             createdAt = event.createdAt,
-            pubkey = event.pubKey,
+            pubkey = author ?: event.pubKey,
             nodeProps = nodeProps,
             slot = slot,
             edges = edges,
-            authorProps = Extractors.authorValues(event, policy),
+            authorProps = if (author != null) authorValues else null,
         )
     }
 
@@ -111,13 +126,36 @@ class EdgeDeriver(
         source?.forEach { (key, value) ->
             val stored: Any =
                 when (value) {
-                    is Int -> value.toLong()
-                    is Short -> value.toLong()
-                    is Byte -> value.toLong()
-                    is Float -> value.toDouble()
-                    is String -> if (Secrets.leaks(value, secrets)) return null else value
-                    is List<*> -> value.map { it.toString() }.also { list -> if (list.any { Secrets.leaks(it, secrets) }) return null }
-                    else -> value
+                    is Int -> {
+                        value.toLong()
+                    }
+
+                    is Short -> {
+                        value.toLong()
+                    }
+
+                    is Byte -> {
+                        value.toLong()
+                    }
+
+                    is Float -> {
+                        value.toDouble()
+                    }
+
+                    is String -> {
+                        if (Secrets.leaks(value, secrets)) return null else value
+                    }
+
+                    is List<*> -> {
+                        // Props lists are List<String> already (roles, labels): no copy unless not.
+                        val list = if (value.all { it is String }) value else value.map { it.toString() }
+                        if (list.any { Secrets.leaks(it as String, secrets) }) return null
+                        list
+                    }
+
+                    else -> {
+                        value
+                    }
                 }
             out[key] = stored
         }
@@ -136,16 +174,22 @@ class EdgeDeriver(
          */
         fun typed(event: Event): Event {
             if (event::class != Event::class) return event
-            return runCatching {
+            return try {
                 EventFactory.create<Event>(event.id, event.pubKey, event.createdAt, event.kind, event.tags, event.content, event.sig)
-            }.getOrDefault(event)
+            } catch (e: Exception) {
+                // A class whose constructor rejects this event: it keeps only the common links.
+                KindLinks.countFailure("EventFactory:${event.kind}")
+                event
+            }
         }
 
-        private fun expiration(tags: Array<Array<String>>): Long? =
-            tags
-                .firstOrNull {
-                    it.size >= 2 && it[0] == "expiration"
-                }?.get(1)
-                ?.toLongOrNull()
+        // The first `expiration` that parses, as Vespa reads it: an unparseable one before a
+        // valid one must not hide the valid one.
+        private fun expiration(tags: Array<Array<String>>): Long? {
+            for (tag in tags) {
+                if (tag.size >= 2 && tag[0] == "expiration") tag[1].toLongOrNull()?.let { return it }
+            }
+            return null
+        }
     }
 }

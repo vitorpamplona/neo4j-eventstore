@@ -51,13 +51,15 @@ object Extractors {
     fun nodeValues(
         event: Event,
         policy: GraphPolicy,
+        authorValues: Map<String, String>? = authorValues(event, policy),
     ): Map<String, Any> {
         val out = HashMap<String, Any>()
         when (event.kind) {
             // A kind 0 keeps the names it sets on its author on its own node too: the author's
             // names can then be restored from whichever kind 0 is still held (Neo4jGraphIndex).
+            // Passed in when the caller already parsed them: kind 0 content can be large.
             0 -> {
-                authorValues(event, policy)?.let { out.putAll(it) }
+                authorValues?.let { out.putAll(it) }
             }
 
             // The reaction symbol: "+", "-", an emoji, or a :shortcode:.

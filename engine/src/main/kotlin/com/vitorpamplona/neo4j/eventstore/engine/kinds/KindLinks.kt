@@ -20,13 +20,16 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
-import com.vitorpamplona.neo4j.eventstore.engine.schema.assembleAddress
+import com.vitorpamplona.neo4j.eventstore.engine.schema.isCanonicalHex64
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.links
+import com.vitorpamplona.quartz.nip01Core.core.Address
 import com.vitorpamplona.quartz.nip01Core.core.Event
 import com.vitorpamplona.quartz.nip01Core.core.isAddressable
 import com.vitorpamplona.quartz.nip01Core.core.isReplaceable
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * An event's links: the vocabulary applied to one event (`docs/vocabulary.md`).
@@ -122,18 +125,36 @@ object KindLinks {
             nipXXPushNotifications()
         }
 
+    private val failures = ConcurrentHashMap<String, AtomicLong>()
+
     /**
      * [event]'s links. [event] must be Quartz's typed class for its kind (`EventFactory`); a
      * plain [Event] states only the common links. A mapper that throws on a malformed event
-     * contributes the links it built before the throw: the rest of the event's graph survives.
+     * contributes the links it built before the throw, so the rest of the event's graph survives;
+     * the throw is counted per class ([failures]), because a mapper bug is deterministic and would
+     * otherwise lose the same links on every event of that kind, silently.
      */
     fun of(event: Event): List<Link<*>> =
         links {
             user(Relation.AUTHOR, event.pubKey)
             ownAddress(event)?.let { address(Relation.ADDRESS, it) }
             everyKindLinks(event.tags)
-            mappers.mapperFor(event.javaClass)?.let { mapper -> runCatching { mapper(event) } }
+            mappers.mapperFor(event.javaClass)?.let { mapper ->
+                try {
+                    mapper(event)
+                } catch (e: Exception) {
+                    countFailure(event.javaClass.simpleName)
+                }
+            }
         }
+
+    /** Counts a derivation step that threw, by where it threw (a class name, or `EventFactory:<kind>`). */
+    fun countFailure(where: String) {
+        failures.computeIfAbsent(where) { AtomicLong() }.incrementAndGet()
+    }
+
+    /** How often each mapper (or re-typing step) threw since start: a non-empty map is a bug to fix. */
+    fun failures(): Map<String, Long> = failures.mapValues { it.value.get() }
 
     /**
      * The one slot [event] competes for under NIP-01: `kind:pubkey:` for replaceable kinds,
@@ -143,8 +164,16 @@ object KindLinks {
      */
     fun ownAddress(event: Event): String? =
         when {
-            event.kind.isAddressable() -> assembleAddress(event.kind, event.pubKey, firstD(event) ?: "")
-            event.kind.isReplaceable() -> assembleAddress(event.kind, event.pubKey, "")
+            // Vespa keys a slot by the RAW pubkey; the graph's keys are lowercase. An author key
+            // that is not already canonical would merge slots Vespa keeps apart (each reconcile
+            // then displacing the other), so such an event competes for no slot here.
+            !isCanonicalHex64(event.pubKey) -> null
+
+            // RAW coordinates: LinkBuilder bounds the `d` exactly once (bounding is not idempotent).
+            event.kind.isAddressable() -> Address.assemble(event.kind, event.pubKey, firstD(event) ?: "")
+
+            event.kind.isReplaceable() -> Address.assemble(event.kind, event.pubKey, "")
+
             else -> null
         }
 

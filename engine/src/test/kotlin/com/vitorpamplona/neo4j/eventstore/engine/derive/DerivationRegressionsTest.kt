@@ -25,12 +25,14 @@ import com.vitorpamplona.neo4j.eventstore.engine.Fixtures.BOB
 import com.vitorpamplona.neo4j.eventstore.engine.Fixtures.CAROL
 import com.vitorpamplona.neo4j.eventstore.engine.Fixtures.event
 import com.vitorpamplona.neo4j.eventstore.engine.Fixtures.hex
+import com.vitorpamplona.neo4j.eventstore.engine.kinds.KindLinks
 import com.vitorpamplona.neo4j.eventstore.engine.schema.LONG_D_PREFIX
 import com.vitorpamplona.neo4j.eventstore.engine.schema.canonicalAddress
 import com.vitorpamplona.quartz.nip01Core.core.hexToByteArray
 import com.vitorpamplona.quartz.nip19Bech32.toNsec
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -171,5 +173,57 @@ class DerivationRegressionsTest {
 
         val untyped = deriver.derive(event(1984, ALICE, listOf(listOf("p", BOB))))
         assertEquals(null, untyped.edges.single { it.type == "REPORTED_USER" }.props["report_raw"], "no text when none was written")
+    }
+
+    @Test
+    fun aPrivateKeyNeverReachesCuratedTextOrTheOwnAddress() {
+        val secret = hex("secret")
+        val nsec = secret.hexToByteArray().toNsec()
+        // A name, a title and a `d` are author-written text like any tag.
+        val profile = deriver.derive(event(0, ALICE, content = """{"name":"$nsec","display_name":"Alice"}"""))
+        assertEquals(mapOf("display_name" to "Alice"), profile.authorProps)
+        assertNull(profile.nodeProps["name"])
+
+        val article = deriver.derive(event(30023, ALICE, listOf(listOf("d", nsec), listOf("title", "my key $nsec"))))
+        assertNull(article.nodeProps["title"])
+        assertNull(article.nodeProps["d"], "the d text is not kept")
+        val slot = article.slot!!.address
+        assertFalse(slot.contains("nsec1"), slot)
+        assertTrue(slot.startsWith("30023:$ALICE:$LONG_D_PREFIX"), "the slot survives, keyed by the d's hash: $slot")
+
+        // The hex of a key pasted as nsec in the content, used as the `d`.
+        val appData = deriver.derive(event(30078, ALICE, listOf(listOf("d", secret)), content = "oops nostr:$nsec"))
+        assertTrue(appData.edges.none { it.target.key.contains(secret) })
+        assertTrue(appData.slot!!.address.startsWith("30078:$ALICE:$LONG_D_PREFIX"))
+    }
+
+    @Test
+    fun aDThatLooksHashedDoesNotCollideWithTheLongDItStandsFor() {
+        val longD = "x".repeat(2000)
+        val long = deriver.derive(event(30023, BOB, listOf(listOf("d", longD)))).slot!!.address
+        val lookalike = deriver.derive(event(30023, BOB, listOf(listOf("d", long.substringAfter("$BOB:"))))).slot!!.address
+        assertTrue(long != lookalike, "two slots Vespa keeps apart stay apart: $long")
+    }
+
+    @Test
+    fun anUppercaseAuthorKeyJoinsItsLowercaseUserAndCompetesForNoSlot() {
+        val doc = deriver.derive(event(0, BOB.uppercase(), content = """{"name":"bob"}"""))
+        assertEquals(BOB, doc.pubkey, "names land on the user the AUTHOR edge points at")
+        assertEquals(mapOf("name" to "bob"), doc.authorProps)
+        assertNull(doc.slot, "Vespa keys the slot by the raw key: merging it with the lowercase one would flap")
+    }
+
+    @Test
+    fun theFirstParseableExpirationWins() {
+        val doc = deriver.derive(event(1, ALICE, listOf(listOf("expiration", "x"), listOf("expiration", "123"))))
+        assertEquals(123L, doc.nodeProps["expires_at"])
+    }
+
+    @Test
+    fun aThrowingMapperIsCounted() {
+        val before = KindLinks.failures().values.sum()
+        // A kind 0 whose mapper reads the content as JSON: this must not throw, and nothing counts.
+        deriver.derive(event(0, ALICE, content = "{not json"))
+        assertEquals(before, KindLinks.failures().values.sum(), "no mapper should throw on malformed input: ${KindLinks.failures()}")
     }
 }

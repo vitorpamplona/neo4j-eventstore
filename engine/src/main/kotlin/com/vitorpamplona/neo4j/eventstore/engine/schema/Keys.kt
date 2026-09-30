@@ -35,6 +35,10 @@ fun isCanonicalHex64(value: String): Boolean {
 }
 
 /**
+ * The canonical address id for a RAW coordinate [value] (as a tag or an event writes it). Not
+ * idempotent: a key already bounded by [boundedD] would be hashed again, so apply it once, at the
+ * edge of the graph ([com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkBuilder]).
+ *
  * The canonical address id for [value], or null if it is not `kind:hexpubkey:d` with a kind in
  * 0..65535 and a lowercase 64-hex pubkey.
  *
@@ -69,12 +73,21 @@ const val LONG_D_PREFIX = "sha256:"
  * tag one) would make its event's transaction fail on every retry and every reconcile. A long
  * `d` is replaced by `sha256:<hex of its UTF-8>`: still one key per distinct `d`, so the slot rule
  * holds; the `d` text itself is not kept.
+ *
+ * A `d` that already starts with [LONG_D_PREFIX] is hashed too, whatever its length: otherwise
+ * `d = "sha256:" + sha256(X)` and a long `d = X` would share one key, and two slots Vespa keeps
+ * apart would collapse into one here (each reconcile then displacing the other).
  */
 fun boundedD(d: String): String {
+    if (d.startsWith(LONG_D_PREFIX)) return hashedD(d)
     if (d.length * 3 <= MAX_ADDRESS_D_BYTES) return d
-    val bytes = d.encodeToByteArray()
-    if (bytes.size <= MAX_ADDRESS_D_BYTES) return d
-    val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
+    if (d.encodeToByteArray().size <= MAX_ADDRESS_D_BYTES) return d
+    return hashedD(d)
+}
+
+/** `sha256:<hex of [d]'s UTF-8>`: a `d` as a key without its text. */
+fun hashedD(d: String): String {
+    val digest = MessageDigest.getInstance("SHA-256").digest(d.encodeToByteArray())
     return LONG_D_PREFIX + digest.joinToString("") { ((it.toInt() and 0xff) or 0x100).toString(16).substring(1) }
 }
 

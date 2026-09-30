@@ -23,7 +23,7 @@ package com.vitorpamplona.neo4j.eventstore.engine.derive
 import com.vitorpamplona.neo4j.eventstore.engine.Fixtures.event
 import com.vitorpamplona.neo4j.eventstore.engine.Fixtures.hex
 import com.vitorpamplona.neo4j.eventstore.engine.schema.GraphPolicy
-import com.vitorpamplona.neo4j.eventstore.engine.schema.canonicalAddress
+import com.vitorpamplona.neo4j.eventstore.engine.schema.MAX_ADDRESS_D_BYTES
 import com.vitorpamplona.neo4j.eventstore.engine.schema.isCanonicalHex64
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
 import com.vitorpamplona.quartz.nip01Core.core.Event
@@ -120,7 +120,12 @@ class DerivationInvariantsTest {
                         }
 
                         NodeKind.ADDRESS -> {
-                            assertEquals(canonicalAddress(edge.target.key), edge.target.key, context)
+                            // Key form: kind:<lowercase 64-hex>:<bounded d>.
+                            val key = AddressKey.parse(edge.target.key)
+                            assertTrue(
+                                key != null && isCanonicalHex64(key.pubkey) && key.d.length <= MAX_ADDRESS_D_BYTES,
+                                "address ${edge.target.key}, $context",
+                            )
                         }
 
                         NodeKind.TAG -> {
@@ -133,9 +138,9 @@ class DerivationInvariantsTest {
                             assertTrue(policy.fitsTagNode(edge.target.key.substringAfter(':')), context)
                         }
                     }
-                    // A secret key revealed by a pasted nsec never becomes a node or a property.
-                    // (The event's OWN address is its identity, not a reference: ADDRESS is exempt.)
-                    if (edge.type != "ADDRESS" && ev.content.contains("nsec1")) {
+                    // A secret key revealed by a pasted nsec never becomes a node or a property —
+                    // not even in the event's own address, whose `d` then joins by its hash.
+                    if (ev.content.contains("nsec1")) {
                         assertFalse(edge.target.key.contains(secret), "leaked secret, $context")
                         assertFalse(edge.props.values.any { it.toString().contains(secret) }, "leaked secret in props, $context")
                     }
@@ -143,6 +148,17 @@ class DerivationInvariantsTest {
                     edge.props.values.forEach { v ->
                         assertTrue(v is String || v is Long || v is Double || v is Boolean || v is List<*>, "prop ${v::class}, $context")
                     }
+                }
+                // Nor any value lifted onto the event or its author.
+                if (ev.content.contains("nsec1")) {
+                    assertFalse(doc.nodeProps.values.any { it.toString().contains(secret) }, "leaked secret on the node, $context")
+                    assertFalse(
+                        doc.authorProps
+                            .orEmpty()
+                            .values
+                            .any { it.contains(secret) },
+                        "leaked secret on the author, $context",
+                    )
                 }
                 // Exactly one authorship edge, to the author.
                 assertEquals(listOf(ev.pubKey), doc.edges.filter { it.type == "AUTHOR" }.map { it.target.key }, context)

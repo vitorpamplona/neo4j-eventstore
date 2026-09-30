@@ -47,5 +47,11 @@ object Secrets {
     fun leaks(
         value: String,
         secrets: Set<String>,
-    ): Boolean = carriesNsec(value) || (secrets.isNotEmpty() && secrets.any { value.contains(it, ignoreCase = true) })
+    ): Boolean {
+        if (carriesNsec(value)) return true
+        if (secrets.isEmpty()) return false
+        // Secrets are lowercase hex; keys are lowercase by now, free text may not be.
+        for (secret in secrets) if (value.contains(secret, ignoreCase = true)) return true
+        return false
+    }
 }

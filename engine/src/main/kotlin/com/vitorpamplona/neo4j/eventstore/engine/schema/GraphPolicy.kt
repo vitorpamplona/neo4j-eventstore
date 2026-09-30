@@ -39,7 +39,12 @@ data class GraphPolicy(
     fun admits(kind: Int) = kind !in excludedKinds
 
     /** Whether [value] is small enough to key a `:Tag` node. */
-    fun fitsTagNode(value: String) = value.isNotEmpty() && value.encodeToByteArray().size <= maxTagValueBytes
+    fun fitsTagNode(value: String): Boolean {
+        if (value.isEmpty()) return false
+        // Every :Tag link passes here: skip the byte copy when even 3 bytes a char fits.
+        if (value.length * 3 <= maxTagValueBytes) return true
+        return value.length <= maxTagValueBytes && value.encodeToByteArray().size <= maxTagValueBytes
+    }
 
     fun hash(): String {
         val canonical =
