@@ -24,6 +24,7 @@ import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkBuilder
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.each
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.ZapProps
+import com.vitorpamplona.quartz.nip01Core.core.HexKey
 import com.vitorpamplona.quartz.nip01Core.core.TagArray
 import com.vitorpamplona.quartz.nip01Core.tags.aTag.ATag
 import com.vitorpamplona.quartz.nip01Core.tags.events.ETag
@@ -39,9 +40,14 @@ internal fun KindMappers.Builder.nip57Zaps() {
     on<PrivateZapEvent> { e -> nip57ZapLinks(e.tags, null) }
 
     // NIP-57 Appendix E: the receipt copies the request's `e`/`a`/`p`/`k`, with the paid `msats`
-    // (from the `bolt11` invoice) on the `ZAPPED` and `ZAP_RECIPIENT` links, and adds the zap
-    // sender as `P`. The zap request embedded in `description` is JSON and is not read here.
-    on<ZapReceiptEvent> { e -> nip57ZapLinks(e.tags, ZapProps(nip57SatsToMsats(e.amount)), withSender = true) }
+    // (from the `bolt11` invoice) on the `ZAPPED` and `ZAP_RECIPIENT` links. The sender is ONE
+    // relationship, `ZAP_SENDER`, read from two places that should agree: the `P` NIP-57 copies
+    // "from the pubkey of the zap request", and that request itself, embedded in `description`
+    // (already parsed by Quartz, `zapRequest`). The request's author is linked `via` the
+    // description only when no `P` names it: absent (zappers that skip the optional `P`) or
+    // different (then both are stated, and both are kept). Nothing else is read out of the
+    // description: the request's own `e`/`p` are the receipt's.
+    on<ZapReceiptEvent> { e -> nip57ZapLinks(e.tags, ZapProps(nip57SatsToMsats(e.amount)), e.zapRequest?.pubKey, withSender = true) }
 
     // NIP-57 Appendix A: the `e`/`a` is the `ZAPPED` content and the `p` the `ZAP_RECIPIENT`, both
     // with the requested `msats` (`nip57AmountMillisats`) when there is one; `k` is the zapped kind.
@@ -52,17 +58,25 @@ internal fun KindMappers.Builder.nip57Zaps() {
  * The NIP-57 tags a zap request, its receipt and a decrypted private zap share: the `e`/`a` is
  * the `ZAPPED` content and the `p` the `ZAP_RECIPIENT` (NIP-57's "recipient"), each with
  * [props] (the `msats`, when the kind knows them); `k` is the zapped kind. With [withSender], the
- * receipt's `P` ([Nip57ZapSenderTag]) is the `ZAP_SENDER`: NIP-57 copies it from the zap
- * request's pubkey.
+ * receipt's `P` ([Nip57ZapSenderTag]) is the `ZAP_SENDER`, and so is [requestAuthor] (the embedded
+ * request's pubkey) when no `P` names it. Tags are read without their relay hints, which no link uses.
  */
 private fun LinkBuilder.nip57ZapLinks(
     tags: TagArray,
     props: ZapProps?,
+    requestAuthor: HexKey? = null,
     withSender: Boolean = false,
 ) {
-    each(tags, PTag::parse) { user(Relation.ZAP_RECIPIENT, it, PTag.TAG_NAME, props) }
-    if (withSender) each(tags, Nip57ZapSenderTag::parse) { user(Relation.ZAP_SENDER, it, Nip57ZapSenderTag.TAG_NAME) }
-    each(tags, ETag::parse) { event(Relation.ZAPPED, it, ETag.TAG_NAME, props) }
-    each(tags, ATag::parse) { address(Relation.ZAPPED, it, ATag.TAG_NAME, props) }
+    each(tags, PTag::parseKey) { user(Relation.ZAP_RECIPIENT, it, PTag.TAG_NAME, props) }
+    if (withSender) {
+        var requestAuthorNamed = false
+        each(tags, Nip57ZapSenderTag::parse) {
+            user(Relation.ZAP_SENDER, it, Nip57ZapSenderTag.TAG_NAME)
+            if (it.equals(requestAuthor, ignoreCase = true)) requestAuthorNamed = true
+        }
+        if (!requestAuthorNamed) user(Relation.ZAP_SENDER, requestAuthor, Nip57DescriptionTag.TAG_NAME)
+    }
+    each(tags, ETag::parseId) { event(Relation.ZAPPED, it, ETag.TAG_NAME, props) }
+    each(tags, ATag::parseAddress) { address(Relation.ZAPPED, it, ATag.TAG_NAME, props) }
     each(tags, KindTag::parse) { tag(Relation.TAG, KindTag.TAG_NAME, it.toString()) }
 }

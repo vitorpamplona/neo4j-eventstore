@@ -147,7 +147,7 @@ the relation comes from today; each row is a golden test when implemented.
 | `PARENT` | E, A | The direct parent: NIP-10 `replyingTo()`, NIP-22 parent item (`e`/`a`), NIP-53's parent space (30313 → 30312), a NIP-34 status's accepted revision. Kind 9 (NIP-C7) puts its parent in a **`q`** tag — the case that shows why tag letters cannot be the schema | 1, 1111, 1244, 1622, 2004, 30818, 14, 42, 1311, 9, 30313, 1630–1633 |
 | `ROOT_AUTHOR` | U | The root scope's author (NIP-22 `P`) | 1111, 1244 |
 | `PARENT_AUTHOR` | U | The parent item's author (NIP-22 `p`) | 1111, 1244 |
-| `MENTION` | E, A, U | Named in passing: a `p` that notifies, a NIP-10 `mention` marker, a `nostr:` URI in the text (NIP-27, `via: content`) | 1, 1111, 9, 24, 42, 1311, 1621, 1622, 9802, 30023, 30817, 30818, … |
+| `MENTION` | E, A, U | Named in passing: a `p` that notifies, a NIP-10 `mention` marker, a `nostr:` URI in the text (NIP-27, `via: content`; only the `nostr:` form, any case: a bare `npub1…` inside a URL is not a mention) | 1, 1111, 9, 24, 42, 1311, 1621, 1622, 9802, 30023, 30817, 30818, … |
 | `QUOTE` | E, A | A NIP-18 `q` (except kind 9, where `q` is the parent) | 1, 42, 1111, 1311, 1621, 30023, … |
 | `FORK` | E | The event a note forks (the `fork` marker) | 1 |
 | `EDITED` | E | The event this one edits | 1010 (TextNoteModification), 3302 |
@@ -160,12 +160,12 @@ the relation comes from today; each row is a golden test when implemented.
 | Relation | Targets | Meaning | Kinds |
 |---|---|---|---|
 | `REACTED` | E, A, T | The reacted-to content (the last `e`/`a`, `originalPost()`); kind 17 reacts to a URL / external id (T) | 7, 17 |
-| `REACTED_AUTHOR` | U | Its author (`originalAuthor()`) | 7 |
+| `REACTED_AUTHOR` | U | Its author (the last `p`; with no `p`, the reacted `e`'s pubkey slot, `via: e`) | 7 |
 | `REPOSTED` | E, A | The reposted content (`boostedEventId()` / `boostedAddress()`) | 6, 16 |
 | `REPOSTED_AUTHOR` | U | Its author | 6, 16 |
 | `ZAPPED` | E, A | The zapped content. Props: `msats` | 9734, 9735, 9733, 9321, 8333, 9736, 9737 |
 | `ZAP_RECIPIENT` | U | Who is paid (NIP-57 `p`, the "recipient"). Props: `msats` | same |
-| `ZAP_SENDER` | U | Who paid (NIP-57 `P`, the "sender": the embedded request's author) | 9735 |
+| `ZAP_SENDER` | U | Who paid (NIP-57's "sender"): the `P`, and the author of the zap request embedded in `description` (`via: description`) when no `P` names it; one relationship, so a `P` equal to the request's author is one link, and a `P` that disagrees with it is kept beside it | 9735 |
 | `HIGHLIGHTED` | E, A | The highlighted source | 9802 |
 | `HIGHLIGHTED_AUTHOR` | U | Its author | 9802 |
 | `CITED` | E, A, U | A `nostr:` URI inside text the event quotes rather than writes (a highlight's excerpt): the quoted author named it, not the event's | 9802 |
@@ -375,6 +375,17 @@ implementing (each is detailed in its appendix row):
 - Kind 24's `p` tags are `RECIPIENT` only; `MENTION` there comes from content alone.
 - Kind 1985's `t` / `r` are label targets (`LABELED`), not `HASHTAG` / `TAG`.
 - A Buzz-style lone `reply` marker is a direct reply: both `ROOT` and `PARENT`.
+- NIP-10 is read as marked OR positional, never both: once any `e` (or non-community `a`)
+  carries a `root` / `reply` marker, the unmarked `e`s beside it are `MENTION`s, not a
+  positional root or parent. A positional tag is one with no marker, whatever its length: an
+  empty marker slot (`["e", id, "", ""]`) or a pubkey there (`["e", id, relay, pubkey]`), whose
+  pubkey names the `PARENT_AUTHOR` like a marked tag's. A NIP-22 parent `e` names its author in
+  slot 3, or slot 4 when written NIP-10 style (`["e", id, "", "reply", pubkey]`).
+- A NIP-56 type slot that is blank writes no type, for a blob's `x` as for `p` / `e` / `a`: the
+  link takes the report's default.
+- A NIP-85 10040 entry's relay is optional: it says where to fetch the provider's assertions,
+  not whether the user trusts the provider.
+- A zap's `msats` on an edge has the node's bound: positive and at most 21M BTC.
 - The unclassified list shrinks to nothing: every kind is now in the appendix.
 
 ## Open decisions the review surfaced
@@ -402,7 +413,10 @@ implementing (each is detailed in its appendix row):
    URL (39701), and a `d` on a regular (non-addressable) kind, which is no address at all.
 6. **Decided: references inside content JSON are left out for now** (buzz 40099 / 40902 /
    44100, DVM results, 30175–30177, marketplace stalls). The appendix rows keep them, marked,
-   for later.
+   for later. **One exception, decided:** a zap receipt's (9735) `description` embeds the zap
+   request, which Quartz already parses (`ZapReceiptEvent.zapRequest`); its author is the
+   `ZAP_SENDER`, the same relation as the `P` that NIP-57 copies from it (`via: description`
+   when no `P` names that author). Nothing else is read out of the description.
 7. **Private list entries** (NIP-44 encrypted NIP-51 items, encrypted DVM requests) are invisible
    to any public index. Stated once, not per row.
 8. **Decided: props are typed per relation** (see the model): strings, numbers, booleans, or a

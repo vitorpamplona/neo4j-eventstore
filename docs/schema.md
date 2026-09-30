@@ -58,7 +58,7 @@ and `GET /graph/schema` lists them. The ones most queries start from:
 | `MENTION`, `QUOTE` | Event → Event / User / Address | A reference without a structural role (a tag, or a `nostr:` URI in the content); a NIP-18 `q` |
 | `REACTED`, `REACTED_AUTHOR` | Event → Event / Address; → User | A reaction's target (NIP-25: the LAST `e`/`a`) and its author (the last `p`) |
 | `REPOSTED`, `REPOSTED_AUTHOR` | Event → Event / Address; → User | A repost's original and its author |
-| `ZAPPED`, `ZAP_RECIPIENT`, `ZAP_SENDER` | Event → Event / Address; → User | A zap request's / receipt's content, recipient and (receipt `P`) sender |
+| `ZAPPED`, `ZAP_RECIPIENT`, `ZAP_SENDER` | Event → Event / Address; → User | A zap request's / receipt's content, recipient and (receipt `P`, or its embedded request's author `via: description`) sender |
 | `FOLLOW` | Event → User | Kind 3 only: the social graph. Other follow-like lists are `SUBSCRIBED`. |
 | `MUTE`, `BOOKMARK`, `PIN`, `MEMBER` | Event → … | NIP-51 lists name their entries as the list does |
 | `REPORTED_USER`, `REPORTED`, `REPORTED_AUTHOR` | Event → User; → Event / Address / Tag; → User | NIP-56: a complaint about the PERSON; the reported content; the author of reported content |

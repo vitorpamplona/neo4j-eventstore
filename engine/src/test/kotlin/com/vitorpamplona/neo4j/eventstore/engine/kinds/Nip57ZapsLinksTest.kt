@@ -20,6 +20,7 @@
  */
 package com.vitorpamplona.neo4j.eventstore.engine.kinds
 
+import com.vitorpamplona.neo4j.eventstore.engine.derive.Extractors
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Link
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.LinkTarget
 import com.vitorpamplona.neo4j.eventstore.engine.vocab.Relation
@@ -27,6 +28,7 @@ import com.vitorpamplona.neo4j.eventstore.engine.vocab.props.ZapProps
 import com.vitorpamplona.quartz.nip57Zaps.PrivateZapEvent
 import com.vitorpamplona.quartz.nip57Zaps.ZapReceiptEvent
 import com.vitorpamplona.quartz.nip57Zaps.ZapRequestEvent
+import java.math.BigDecimal
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -130,5 +132,57 @@ class Nip57ZapsLinksTest {
             ),
             event.links(),
         )
+    }
+
+    private fun request(author: String) =
+        ZapRequestEvent(id, author, 1L, arrayOf(arrayOf("p", recipient), arrayOf("e", zapped)), "", sig).toJson()
+
+    private fun receipt(vararg tags: Array<String>) = ZapReceiptEvent(id, "c1".repeat(32), 1L, arrayOf(*tags), "", sig)
+
+    private fun senders(event: ZapReceiptEvent) = event.links().filter { it.relation == Relation.ZAP_SENDER }
+
+    @Test
+    fun theSenderIsOneRelationshipWhetherPOrTheRequestNamesIt() {
+        // P copies the request's author: one ZAP_SENDER, via P
+        assertEquals(
+            listOf(Link(Relation.ZAP_SENDER, LinkTarget.User(sender), "P")),
+            senders(receipt(arrayOf("p", recipient), arrayOf("P", sender), arrayOf("description", request(sender)))),
+        )
+        // no P: the embedded request's author, via the description
+        assertEquals(
+            listOf(Link(Relation.ZAP_SENDER, LinkTarget.User(sender), "description")),
+            senders(receipt(arrayOf("p", recipient), arrayOf("description", request(sender)))),
+        )
+        // they disagree: both are stated, and both are kept
+        val other = "b3".repeat(32)
+        assertEquals(
+            listOf(
+                Link(Relation.ZAP_SENDER, LinkTarget.User(other), "P"),
+                Link(Relation.ZAP_SENDER, LinkTarget.User(sender), "description"),
+            ),
+            senders(receipt(arrayOf("p", recipient), arrayOf("P", other), arrayOf("description", request(sender)))),
+        )
+        // nothing else is read out of the description: its p/e are the receipt's to state
+        assertEquals(
+            listOf(Link(Relation.ZAP_SENDER, LinkTarget.User(sender), "description")),
+            receipt(arrayOf("description", request(sender))).links(),
+        )
+    }
+
+    @Test
+    fun msatsAreCappedAt21MillionBitcoin() {
+        assertEquals(Extractors.MAX_MSATS, NIP57_MAX_MSATS, "the edge's bound is the node's")
+
+        fun requested(amount: String) =
+            ZapRequestEvent(id, me, 1L, arrayOf(arrayOf("amount", amount), arrayOf("p", recipient)), "", sig).links().single().props
+
+        assertEquals(ZapProps(NIP57_MAX_MSATS), requested(NIP57_MAX_MSATS.toString()))
+        assertEquals(null, requested((NIP57_MAX_MSATS + 1).toString()))
+        assertEquals(null, requested("0"))
+
+        assertEquals(NIP57_MAX_MSATS, nip57SatsToMsats(BigDecimal("2100000000000000")))
+        assertEquals(null, nip57SatsToMsats(BigDecimal("2100000000000000.001")))
+        // a plain toLong() would keep the low 64 bits of this one
+        assertEquals(null, nip57SatsToMsats(BigDecimal("18446744073709551.616")))
     }
 }
