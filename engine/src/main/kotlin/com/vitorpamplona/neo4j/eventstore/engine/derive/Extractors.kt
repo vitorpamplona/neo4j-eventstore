@@ -39,7 +39,12 @@ object Extractors {
     const val MSATS = "msats"
     const val TITLE = "title"
 
-    val USER_FIELDS = listOf("name", "display_name", "nip05")
+    /**
+     * The kind-0 fields kept on the profile's own node. Never copied onto its `:User`: a user's
+     * names are one keyed hop away (`(:Address {id: '0:' + pk + ':'})<-[:ADDRESS]-(profile)`), and a
+     * copy would have to be cleared, and restored from another held kind 0, on every removal.
+     */
+    val PROFILE_FIELDS = listOf("name", "display_name", "nip05")
 
     private const val MAX_REACTION_BYTES = 32
 
@@ -51,15 +56,12 @@ object Extractors {
     fun nodeValues(
         event: Event,
         policy: GraphPolicy,
-        authorValues: Map<String, String>? = authorValues(event, policy),
     ): Map<String, Any> {
         val out = HashMap<String, Any>()
         when (event.kind) {
-            // A kind 0 keeps the names it sets on its author on its own node too: the author's
-            // names can then be restored from whichever kind 0 is still held (Neo4jGraphIndex).
-            // Passed in when the caller already parsed them: kind 0 content can be large.
+            // The names a profile states, for lookups (`nip05`) and for showing a user.
             0 -> {
-                authorValues?.let { out.putAll(it) }
+                out.putAll(profileValues(event, policy))
             }
 
             // The reaction symbol: "+", "-", an emoji, or a :shortcode:.
@@ -90,15 +92,14 @@ object Extractors {
         return out
     }
 
-    /** Kind 0 only: the name / display_name / nip05 it sets on its author (null otherwise). */
-    fun authorValues(
+    /** A kind 0's [PROFILE_FIELDS] that are non-blank strings, each bounded to the curated size. */
+    private fun profileValues(
         event: Event,
         policy: GraphPolicy,
-    ): Map<String, String>? {
-        if (event.kind != 0) return null
+    ): Map<String, String> {
         val obj = runCatching { json.parseToJsonElement(event.content) as? JsonObject }.getOrNull() ?: return emptyMap()
         val out = HashMap<String, String>()
-        for (field in USER_FIELDS) {
+        for (field in PROFILE_FIELDS) {
             val value = (obj[field] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: continue
             if (value.isNotBlank()) out[field] = truncateUtf8(value, policy.maxCuratedBytes)
         }

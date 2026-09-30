@@ -64,12 +64,13 @@ class BulkImportIT {
             val random = Random(3)
             val source = SimulatedSource()
             Histories.drive(source, GraphCorpus(3), random, steps = 400, resurrections = false)
-            // A dump spans time: an older kind 0 of the same author can sit in it too, FIRST in
-            // the file, so its names win the user row. The reconcile below must end with the
-            // current kind 0's names (and without the stale version).
+            // A dump spans time: an older kind 0 of the same author can sit in it too. The
+            // reconcile below must remove the stale version, leaving the current one's names on
+            // the current profile and none on the user.
             val named = hex("named")
             val stale = Event(hex("stale0"), named, 1_600_000_000, 0, emptyArray(), "{\"name\":\"old\"}", SIG)
-            source.put(Event(hex("current0"), named, 1_700_000_000, 0, emptyArray(), "{\"name\":\"new\"}", SIG))
+            val current = Event(hex("current0"), named, 1_700_000_000, 0, emptyArray(), "{\"name\":\"new\"}", SIG)
+            source.put(current)
             // Another slot the dump caught twice. Online, a version older than its winner must be
             // stale (compared against the WINNER, not whichever version the slot lookup returned
             // first), and a newer one must displace BOTH.
@@ -127,7 +128,8 @@ class BulkImportIT {
                     assertEquals(1L, report.extra, "the stale kind 0 is the one extra")
                     val expected = InMemoryGraphIndex().apply { apply(source.held.values.toList()) }.dump()
                     val actual = graph.dump()
-                    assertEquals("new", actual.nodes.single { it.key == named }.props["name"])
+                    assertEquals("new", actual.nodes.single { it.key == current.id }.props["name"])
+                    assertEquals(emptyMap<String, Any>(), actual.nodes.single { it.key == named }.props, "the user carries only its key")
                     assertEquals(expected.nodes.size, actual.nodes.size, "node count")
                     assertEquals(expected.edges.size, actual.edges.size, "edge count")
                     assertEquals(expected, actual)

@@ -254,9 +254,9 @@ class ProjectionIT {
     // Rare shapes the random histories do not reach, compared with the spec: a new version of a
     // list whose old version's address was the only reference to its owner (the owner must be
     // KEPT, since the new version's address re-MERGEs it in the same transaction), and a profile
-    // signed with an uppercase pubkey (names on the AUTHOR edge's user, no second user).
+    // signed with an uppercase pubkey (the AUTHOR edge's user and no second one; names on the profile).
     @Test
-    fun supersedingKeepsTheOwnerOfTheNewVersionsAddressesAndNamesFollowTheAuthorEdge(): Unit =
+    fun supersedingKeepsTheOwnerOfTheNewVersionsAddressesAndAnUppercaseAuthorIsOneUser(): Unit =
         runBlocking {
             val driver = Neo4jTestServer.freshDriver()
             SchemaInstaller(driver).install(GraphPolicy.Default)
@@ -278,7 +278,8 @@ class ProjectionIT {
             val dump = neo4j.dump()
             assertSameGraph(spec.dump(), dump, "after superseding")
             assertTrue(dump.nodes.any { it.label == Labels.USER && it.key == bob }, "the new address's owner")
-            assertEquals("up", dump.nodes.single { it.label == Labels.USER && it.key == upper }.props["name"])
+            assertEquals(emptyMap<String, Any>(), dump.nodes.single { it.label == Labels.USER && it.key == upper }.props)
+            assertEquals("up", dump.nodes.single { it.label == Labels.EVENT && it.key == profile.id }.props["name"])
             assertTrue(dump.nodes.none { it.key == upper.uppercase() })
             driver.close()
         }

@@ -29,7 +29,6 @@ import com.vitorpamplona.neo4j.eventstore.engine.HeldRef
 import com.vitorpamplona.neo4j.eventstore.engine.NodeView
 import com.vitorpamplona.neo4j.eventstore.engine.derive.AddressKey
 import com.vitorpamplona.neo4j.eventstore.engine.derive.EdgeDeriver
-import com.vitorpamplona.neo4j.eventstore.engine.derive.Extractors
 import com.vitorpamplona.neo4j.eventstore.engine.derive.GraphDoc
 import com.vitorpamplona.neo4j.eventstore.engine.derive.NodeKind
 import com.vitorpamplona.neo4j.eventstore.engine.derive.NodeRef
@@ -60,7 +59,7 @@ class InMemoryGraphIndex(
 
     private val held = HashMap<String, GraphDoc>() // stored events, by id
     private val stubs = HashSet<String>() // referenced-but-not-held event ids
-    private val users = HashMap<String, MutableMap<String, Any>>()
+    private val users = HashSet<String>() // a `:User` carries only its key
     private val addresses = HashMap<String, AddressKey>()
     private val tagNodes = HashMap<String, Pair<String, String>>()
     private val incoming = HashMap<NodeRef, Int>()
@@ -142,13 +141,6 @@ class InMemoryGraphIndex(
             ensureNode(edge.target)
             incoming.merge(edge.target, 1, Int::plus)
         }
-        val author = doc.authorKey
-        if (doc.authorProps != null && author != null) {
-            // The AUTHOR edge above created the node; never key on the raw pubkey (GraphDoc.authorKey).
-            val props = users.getOrPut(author) { HashMap() }
-            Extractors.USER_FIELDS.forEach { props.remove(it) }
-            props.putAll(doc.authorProps)
-        }
     }
 
     private fun ensureNode(ref: NodeRef) {
@@ -158,7 +150,7 @@ class InMemoryGraphIndex(
             }
 
             NodeKind.USER -> {
-                users.getOrPut(ref.key) { HashMap() }
+                users.add(ref.key)
             }
 
             NodeKind.TAG -> {
@@ -194,9 +186,6 @@ class InMemoryGraphIndex(
         held.remove(doc.id)
         stamps.remove(doc.id)
         doc.slot?.let { slots.remove(it.address, doc.id) }
-        if (doc.authorProps != null) {
-            doc.authorKey?.let { users[it] }?.let { props -> Extractors.USER_FIELDS.forEach { props.remove(it) } }
-        }
         // The node survives as a stub while anything still points at it.
         val self = NodeRef(NodeKind.EVENT, doc.id)
         if ((incoming[self] ?: 0) > 0) stubs.add(doc.id)
@@ -268,7 +257,7 @@ class InMemoryGraphIndex(
             val nodes = HashSet<NodeView>()
             for (doc in held.values) nodes += NodeView(Labels.EVENT, doc.id, true, eventProps(doc, stamps[doc.id] ?: 0L))
             for (id in stubs) nodes += NodeView(Labels.EVENT, id, false, emptyMap())
-            for ((pk, props) in users) nodes += NodeView(Labels.USER, pk, false, HashMap(props))
+            for (pk in users) nodes += NodeView(Labels.USER, pk, false, emptyMap())
             for ((id, key) in addresses) nodes += NodeView(Labels.ADDRESS, id, false, addressProps(key))
             for ((key, nv) in tagNodes) nodes += NodeView(Labels.TAG, key, false, mapOf("name" to nv.first, "value" to nv.second))
 
@@ -292,7 +281,7 @@ class InMemoryGraphIndex(
             InMemoryGraphIndex(deriver, fenceSeconds, nowSecs).also { copy ->
                 copy.held.putAll(held)
                 copy.stubs.addAll(stubs)
-                users.forEach { (k, v) -> copy.users[k] = HashMap(v) }
+                copy.users.addAll(users)
                 copy.addresses.putAll(addresses)
                 copy.tagNodes.putAll(tagNodes)
                 copy.incoming.putAll(incoming)

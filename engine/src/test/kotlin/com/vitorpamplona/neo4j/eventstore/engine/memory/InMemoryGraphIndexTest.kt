@@ -150,16 +150,17 @@ class InMemoryGraphIndexTest {
         }
 
     @Test
-    fun authorNamesLandOnTheAuthorEdgesUserNotOnTheRawPubkey() =
+    fun anUppercaseAuthorIsTheLowercaseUserAndNoOther() =
         runTest {
-            // The vocabulary lowercases the AUTHOR target; the names must follow it, not mint a
-            // second, edgeless `:User` under the uppercase spelling.
+            // The vocabulary lowercases the AUTHOR target: no second `:User` under the uppercase
+            // spelling, and the profile's names stay on the profile.
             val upper = ALICE.uppercase()
             val profile = event(0, upper, content = """{"name":"alice"}""")
             graph.apply(listOf(profile))
             val dump = graph.dump()
             assertNull(dump.node(Labels.USER, upper), "no user under the raw pubkey")
-            assertEquals(mapOf<String, Any>("name" to "alice"), dump.node(Labels.USER, ALICE)!!.props)
+            assertEquals(emptyMap<String, Any>(), dump.node(Labels.USER, ALICE)!!.props)
+            assertEquals("alice", dump.node(Labels.EVENT, profile.id)!!.props["name"])
             graph.unapply(listOf(profile.id))
             assertEquals(GraphDump(emptySet(), emptySet()), graph.dump(), "and they go with it")
         }
@@ -192,14 +193,17 @@ class InMemoryGraphIndexTest {
         }
 
     @Test
-    fun kindZeroNamesComeAndGoWithTheCurrentProfile() =
+    fun aProfilesNamesStayOnTheProfileAndItsUserCarriesOnlyItsKey() =
         runTest {
             val v1 = event(0, ALICE, content = """{"name":"alice"}""", createdAt = 100)
             val v2 = event(0, ALICE, content = """{"nip05":"a@b.c"}""", createdAt = 200)
             graph.apply(listOf(v1))
-            assertEquals(mapOf<String, Any>("name" to "alice"), graph.dump().node(Labels.USER, ALICE)!!.props)
             graph.apply(listOf(v2))
-            assertEquals(mapOf<String, Any>("nip05" to "a@b.c"), graph.dump().node(Labels.USER, ALICE)!!.props, "no stale name left behind")
+            // Removing the superseded profile leaves the current one's names where they were.
+            graph.unapply(listOf(v1.id))
+            val dump = graph.dump()
+            assertEquals("a@b.c", dump.node(Labels.EVENT, v2.id)!!.props["nip05"])
+            assertEquals(emptyMap<String, Any>(), dump.node(Labels.USER, ALICE)!!.props, "no copy on the user to go stale")
             graph.unapply(listOf(v2.id))
             assertNull(graph.dump().node(Labels.USER, ALICE))
         }

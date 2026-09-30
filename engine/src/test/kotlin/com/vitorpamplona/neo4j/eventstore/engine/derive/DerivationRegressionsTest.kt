@@ -181,7 +181,7 @@ class DerivationRegressionsTest {
         val nsec = secret.hexToByteArray().toNsec()
         // A name, a title and a `d` are author-written text like any tag.
         val profile = deriver.derive(event(0, ALICE, content = """{"name":"$nsec","display_name":"Alice"}"""))
-        assertEquals(mapOf("display_name" to "Alice"), profile.authorProps)
+        assertEquals("Alice", profile.nodeProps["display_name"])
         assertNull(profile.nodeProps["name"])
 
         val article = deriver.derive(event(30023, ALICE, listOf(listOf("d", nsec), listOf("title", "my key $nsec"))))
@@ -208,8 +208,13 @@ class DerivationRegressionsTest {
     @Test
     fun anUppercaseAuthorKeyJoinsItsLowercaseUserAndCompetesForNoSlot() {
         val doc = deriver.derive(event(0, BOB.uppercase(), content = """{"name":"bob"}"""))
-        assertEquals(BOB, doc.pubkey, "names land on the user the AUTHOR edge points at")
-        assertEquals(mapOf("name" to "bob"), doc.authorProps)
+        assertEquals(BOB, doc.pubkey, "the author is the user the AUTHOR edge points at")
+        assertEquals(
+            BOB,
+            doc.edges
+                .single { it.type == "AUTHOR" }
+                .target.key,
+        )
         assertNull(doc.slot, "Vespa keys the slot by the raw key: merging it with the lowercase one would flap")
     }
 

@@ -213,7 +213,7 @@ Consequences:
 |---|---|---|---|
 | `:Event:Stored` | `id` | `kind`, `created_at`, `d` (addressables), `expires_at` (NIP-40), curated values (§4.3), `derived` (the derivation stamp, §7.2) | Vespa holds the event |
 | `:Event` (stub) | `id` | none | Something references an id we do not hold (never seen, excluded, or removed) |
-| `:User` | `pubkey` | curated values from kind 0 (§4.3) | It authored, or was referenced |
+| `:User` | `pubkey` | none: names stay on the kind 0 that states them (§4.3) | It authored, or was referenced |
 | `:Address` | `id` = `kind:pubkey:d` (Quartz `AddressSerializer` form) | `kind`, `pubkey`, `d` | Any **addressable** event (30000–39999), or a reference to any address, including a replaceable one such as `10002:<pk>:` |
 | `:Tag` | `key` = `name:value` | `name`, `value` | A value a kind's mapper links that is not an event, user or address: a hashtag, a URL, an external id, a group id (§5) |
 | `:Meta` | singleton | `schema_version`, `policy_hash`, `derivation_version`, `derived` | Written by `SchemaInstaller` |
@@ -244,7 +244,7 @@ Consequences:
 - the four uniqueness constraints;
 - range indexes on `:Stored(created_at)` (the reconciler's windows) and `:Stored(kind)`;
 - `:Stored(expires_at)`;
-- `:User(nip05)`, `:Address(kind)`;
+- `:Stored(nip05)` (kind-0 names), `:Address(kind)`;
 - relationship indexes on `report` and `report_raw` of `REPORTED_USER`, `REPORTED` and
   `REPORTED_AUTHOR`.
 
@@ -292,7 +292,7 @@ report's category, an assertion's rank, a zap's amount) ride that edge as the re
 
 | Kind | Where | Property | Quartz source |
 |---|---|---|---|
-| 0 | `:User` | `name`, `display_name`, `nip05` (each ≤ 256 bytes) | kind-0 metadata parse. The current kind 0 wins, and unapplying it clears the values. |
+| 0 | the profile's `:Event` | `name`, `display_name`, `nip05` (each ≤ 256 bytes) | kind-0 metadata parse. Never copied onto the `:User`: the current profile is one hop away through its `0:<pk>:` address, and a copy would need clearing and restoring on every removal. *Built (2.0):* 1.x also copied them onto the `:User`. |
 | 7 | the reaction's `:Event` | `content` (≤ 32 bytes: `+`, `-`, an emoji or a `:shortcode:`) | `ReactionEvent.content` |
 | 9735 | the receipt's `:Event` | `msats` | `ZapReceiptEvent.amount()` |
 | 9734 / 9321 / 8333 / 9736 | the event | `msats` where the kind states an amount |  |
@@ -464,11 +464,10 @@ processes cannot both win a slot.
 3. If `e`'s id was **unapplied within the last hour** (the recent-removal table, below), skip
    it. It is a late put racing its own removal.
 4. Write the node (promoting a stub if one exists), its edges (its `ADDRESS` among them), each
-   new `:Address`'s `AUTHOR` edge to its pubkey, and its curated values.
+   new `:Address`'s `AUTHOR` edge to its pubkey, and its curated values (on its own node only).
 
 **`unapply(id)`:**
 - apply the stub rule (§4.1);
-- clear curated values it owned (e.g. kind-0 names);
 - record `(id, now)` in the recent-removal table, a `:Removed {id, at}` node with a TTL sweep.
 
 **Ordering.** The two writer processes feed Neo4j independently, so deliveries can interleave in
@@ -698,7 +697,7 @@ label:
   - An event Vespa removed between the Cypher read and the fetch comes back as
     `{"id", "stored": false}`.
 - A stub `:Event` is `{"id", "stored": false}`.
-- `:User` is `{"pubkey", "name", …}`, `:Address` is `{"address", "kind", "pubkey", "d"}`, and
+- `:User` is `{"pubkey"}`, `:Address` is `{"address", "kind", "pubkey", "d"}`, and
   `:Tag` is `{"name", "value"}`.
 - A relationship is `{"type", "start", "end", …props}`, and a path is an alternating list.
 - Integers outside ±2^53 are strings.

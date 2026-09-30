@@ -65,8 +65,8 @@ data class Slot(
 
 /**
  * What one event projects to (spec §4–§5): the event node's properties, its slot, every
- * outgoing edge (its `AUTHOR` and `ADDRESS` included), and — for kind 0 only — the curated
- * values it sets on its author.
+ * outgoing edge (its `AUTHOR` and `ADDRESS` included). It writes nothing onto other nodes: a
+ * kind 0's names stay on the kind 0.
  */
 data class GraphDoc(
     val id: String,
@@ -76,17 +76,7 @@ data class GraphDoc(
     val nodeProps: Map<String, Any>,
     val slot: Slot?,
     val edges: List<EdgeDoc>,
-    val authorProps: Map<String, String>? = null,
-) {
-    /**
-     * The key of the `:User` this event's `AUTHOR` edge points at, or null when it has none (a
-     * pubkey that is not 64-hex). Curated author values ([authorProps]) are set on THIS node,
-     * never on the raw [pubkey]: an uppercase pubkey is lowercased by the vocabulary, so keying on
-     * the raw string would miss the author in Neo4j and mint an orphan `:User` in memory.
-     */
-    val authorKey: String?
-        get() = edges.firstOrNull { it.type == Relation.AUTHOR.name && it.target.kind == NodeKind.USER }?.target?.key
-}
+)
 
 /** An `:Address` node's properties, recovered from its id (`kind:pubkey:d`). */
 data class AddressKey(

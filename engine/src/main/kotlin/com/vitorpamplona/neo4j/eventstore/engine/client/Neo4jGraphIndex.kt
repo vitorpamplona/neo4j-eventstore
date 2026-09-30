@@ -29,7 +29,6 @@ import com.vitorpamplona.neo4j.eventstore.engine.HeldRef
 import com.vitorpamplona.neo4j.eventstore.engine.NodeView
 import com.vitorpamplona.neo4j.eventstore.engine.derive.AddressKey
 import com.vitorpamplona.neo4j.eventstore.engine.derive.EdgeDeriver
-import com.vitorpamplona.neo4j.eventstore.engine.derive.Extractors
 import com.vitorpamplona.neo4j.eventstore.engine.derive.GraphDoc
 import com.vitorpamplona.neo4j.eventstore.engine.derive.NodeKind
 import com.vitorpamplona.neo4j.eventstore.engine.derive.wins
@@ -246,9 +245,9 @@ class Neo4jGraphIndex(
 
     /**
      * Stores [doc] in ONE statement: the node, its fence cleared, every edge group (a unit `CALL`
-     * per target kind keeps the row count at one), and the author's curated names. Each
-     * statement is a blocking round trip inside the event's transaction — which holds the
-     * process's write lock — so folding them is most of the live path's per-event cost.
+     * per target kind keeps the row count at one). Each statement is a blocking round trip
+     * inside the event's transaction — which holds the process's write lock — so folding them is
+     * most of the live path's per-event cost.
      */
     private fun write(
         tx: TransactionContext,
@@ -325,17 +324,6 @@ class Neo4jGraphIndex(
             cypher.append("} ")
         }
 
-        // After the USER group, which MERGEd the author: keyed on the AUTHOR edge's target, never
-        // the raw pubkey (GraphDoc.authorKey), and skipped when there is no such edge.
-        val author = doc.authorKey
-        if (doc.authorProps != null && author != null) {
-            params["pk"] = author
-            params["authorProps"] = doc.authorProps
-            cypher.append(
-                "CALL (e) { MATCH (u:${Labels.USER} {${Labels.USER_KEY}: \$pk}) " +
-                    Extractors.USER_FIELDS.joinToString(" ") { "SET u.$it = null" } + " SET u += \$authorProps } ",
-            )
-        }
         tx.run(cypher.toString(), params).consume()
     }
 
@@ -379,35 +367,14 @@ class Neo4jGraphIndex(
         id: String,
         keep: Set<Pair<NodeKind, String>> = emptySet(),
     ): Boolean {
-        // Lock, and learn what the event owned: its kind (kind 0 owns its author's names).
-        val kind =
-            tx
-                .run(
-                    "MATCH (e:${Labels.EVENT}:${Labels.STORED} {${Labels.EVENT_KEY}: \$id}) " +
-                        "SET e.__lock = true REMOVE e.__lock RETURN e.kind AS kind",
-                    mapOf("id" to id),
-                ).list()
-                .firstOrNull()
-                ?.get("kind")
-                ?.asLong() ?: return false
-        if (kind == 0L) {
-            // The author's names come from their CURRENT kind 0. Online there is only ever one
-            // held; after a bulk load an older one can sit beside it until the reconciler removes
-            // it — so fall back to whichever kind 0 is still held (its node keeps the names too).
-            tx
-                .run(
-                    "MATCH (e:${Labels.EVENT} {${Labels.EVENT_KEY}: \$id})-[:$AUTHOR]->(u:${Labels.USER}) " +
-                        Extractors.USER_FIELDS.joinToString(" ") { "SET u.$it = null" } +
-                        // Through the `0:<pubkey>:` address every kind 0 has: one hop to the
-                        // author's kind 0s, not a walk over everything they ever signed.
-                        " WITH e, u OPTIONAL MATCH (e)-[:$ADDRESS]->(:${Labels.ADDRESS})<-[:$ADDRESS]-(k:${Labels.STORED}) " +
-                        "WHERE k.${Labels.EVENT_KEY} <> \$id " +
-                        "WITH u, k ORDER BY k.created_at DESC, k.${Labels.EVENT_KEY} ASC LIMIT 1 " +
-                        "WITH u, k WHERE k IS NOT NULL " +
-                        Extractors.USER_FIELDS.joinToString(" ") { "SET u.$it = k.$it" },
-                    mapOf("id" to id),
-                ).consume()
-        }
+        // Lock it, and learn whether it is held at all.
+        tx
+            .run(
+                "MATCH (e:${Labels.EVENT}:${Labels.STORED} {${Labels.EVENT_KEY}: \$id}) " +
+                    "SET e.__lock = true REMOVE e.__lock RETURN e.${Labels.EVENT_KEY} AS id",
+                mapOf("id" to id),
+            ).list()
+            .firstOrNull() ?: return false
         val targets =
             tx
                 .run(

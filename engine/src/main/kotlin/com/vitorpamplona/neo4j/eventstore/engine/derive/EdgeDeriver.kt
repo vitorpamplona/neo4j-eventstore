@@ -77,12 +77,10 @@ class EdgeDeriver(
         }
         expiration(event.tags)?.let { nodeProps[EXPIRES_AT] = it }
         // Curated text is author-written too: the nsec rule covers it like any key or prop.
-        val authorValues = Extractors.authorValues(event, policy)?.filterValues { !Secrets.leaks(it, secrets) }
-        Extractors.nodeValues(event, policy, authorValues).forEach { (k, v) ->
+        Extractors.nodeValues(event, policy).forEach { (k, v) ->
             if (v !is String || !Secrets.leaks(v, secrets)) nodeProps[k] = v
         }
-        // The author's key as its AUTHOR edge holds it (lowercased); an invalid one has no
-        // edge, so there is no `:User` to carry names.
+        // The author's key as its AUTHOR edge holds it (lowercased).
         val author = edges.firstOrNull { it.type == Relation.AUTHOR.name }?.target?.key
 
         return GraphDoc(
@@ -93,7 +91,6 @@ class EdgeDeriver(
             nodeProps = nodeProps,
             slot = slot,
             edges = edges,
-            authorProps = if (author != null) authorValues else null,
         )
     }
 

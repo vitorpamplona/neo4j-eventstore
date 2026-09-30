@@ -149,16 +149,9 @@ class DerivationInvariantsTest {
                         assertTrue(v is String || v is Long || v is Double || v is Boolean || v is List<*>, "prop ${v::class}, $context")
                     }
                 }
-                // Nor any value lifted onto the event or its author.
+                // Nor any value lifted onto the event.
                 if (ev.content.contains("nsec1")) {
                     assertFalse(doc.nodeProps.values.any { it.toString().contains(secret) }, "leaked secret on the node, $context")
-                    assertFalse(
-                        doc.authorProps
-                            .orEmpty()
-                            .values
-                            .any { it.contains(secret) },
-                        "leaked secret on the author, $context",
-                    )
                 }
                 // Exactly one authorship edge, to the author.
                 assertEquals(listOf(ev.pubKey), doc.edges.filter { it.type == "AUTHOR" }.map { it.target.key }, context)

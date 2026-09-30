@@ -29,12 +29,20 @@ the [link vocabulary](vocabulary.md).
 |---|---|---|---|
 | `:Event:Stored` | `id` (64-hex) | `kind`, `created_at`, `d` (addressable kinds), `expires_at` (NIP-40), and curated values (below) | An event the relay holds |
 | `:Event` (without `:Stored`) | `id` | — | A **stub**: an id something references that the relay does not hold. Filter with `NOT n:Stored` (e.g. "most-cited missing events"). |
-| `:User` | `pubkey` (64-hex) | `name`, `display_name`, `nip05` (from the current kind 0) | Anyone who authored or was referenced |
+| `:User` | `pubkey` (64-hex) | — | Anyone who authored or was referenced. Names live on their kind 0 (below). |
 | `:Address` | `id` = `kind:pubkey:d` | `kind`, `pubkey`, `d` | Every replaceable (`3:<pk>:`, `10002:<pk>:`) and addressable (`30023:<pk>:<d>`) event's own address, plus any address something references. Kinds are 0–65535. A `d` longer than 1024 UTF-8 bytes appears as `sha256:<hex of the d>` (the key must stay indexable); it is still one node per distinct `d`. |
 | `:Tag` | `key` = `name:value` | `name`, `value` | A value a kind links that is not an event, user or address: a hashtag (`t:nostr`), a URL (`r:https://…`), an external id (`i:isbn:…`), a group (`h:<id>`), a kind (`k:1`). `name` is the tag it was written in. Values of 256 bytes or less. |
 
 **An event's author is an edge, not a property.** Filter by author from the user:
 `(:User {pubkey: $pk})<-[:AUTHOR]-(n:Stored)`.
+
+**A user's names are on their profile, not on the `:User`.** A kind 0 is replaceable, so its
+own address `0:<pk>:` reaches the current one with an index seek and one hop:
+`(:Address {id: '0:' + $pk + ':'})<-[:ADDRESS]-(profile:Stored)` then `profile.name`,
+`profile.display_name`, `profile.nip05`. To name the users a query returns, add
+`OPTIONAL MATCH (:Address {id: '0:' + u.pubkey + ':'})<-[:ADDRESS]-(p:Stored)` per row. The other
+way round, `(:Stored {nip05: $name})-[:AUTHOR]->(u)` is an index seek. The `:User` carries no
+copy: a copy would have to be cleared, and restored from another held kind 0, on every removal.
 
 **Replaceable and addressable events hang off their address.** Each version points at its own
 `:Address` through `ADDRESS`, and the projection keeps exactly one held version per address. A
@@ -136,11 +144,10 @@ are Cypher integers; lists are string lists (test membership with `'admin' IN r.
 
 | Where | Property | From |
 |---|---|---|
-| `:User` | `name`, `display_name`, `nip05` | The user's current kind 0 |
 | kind-7 `:Event` | `content` | The reaction symbol (`+`, `-`, an emoji, `:shortcode:`), up to 32 bytes |
 | kind-9735 `:Event` | `msats` | The receipt's bolt11 amount |
 | kind-9734 `:Event` | `msats` | The request's `amount` tag |
-| kind-0 `:Event` | `name`, `display_name`, `nip05` | The same names it sets on its author (so they survive the author's other kind 0 being removed) |
+| kind-0 `:Event` | `name`, `display_name`, `nip05` | The profile's JSON, each a non-blank string of up to 256 bytes |
 | kinds 30023, 30311, 34550 | `title` | The `title` tag (or `name` for a community) |
 
 ---
@@ -174,7 +181,7 @@ on a graph whose `schema_version` has another major.
 ### Indexes
 
 Besides the four key constraints: `:Stored(created_at)`, `:Stored(kind)`, `:Stored(expires_at)`,
-`:User(nip05)`, `:Address(kind)`, and `report` / `report_raw` on `REPORTED_USER`, `REPORTED` and
+`:Stored(nip05)`, `:Address(kind)`, and `report` / `report_raw` on `REPORTED_USER`, `REPORTED` and
 `REPORTED_AUTHOR`.
 
 ## Example queries

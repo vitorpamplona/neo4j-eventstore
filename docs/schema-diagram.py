@@ -115,14 +115,14 @@ AX, AY = 980, 760  # own Address
 R = 58
 
 node(UX, UY, R, "User", caption=None)
-props(UX - R - 14, UY - 40, ["pubkey:", "name:", "display_name:", "nip05:"], anchor="end")
-text(UX - R - 14, UY + 50, "(names from the current kind 0)", size=12, anchor="end", fill="#555", italic=True)
+props(UX - R - 14, UY - 4, ["pubkey:"], anchor="end")
+text(UX - R - 14, UY + 22, "(names: on its kind 0, via 0:pubkey:)", size=12, anchor="end", fill="#555", italic=True)
 
 node(EX, EY, R, "Event", label="Event:Stored")
 props(
-    EX, EY - R - 150,
+    EX, EY - R - 169,
     ["id:", "kind:", "created_at:", "d:  (addressable kinds)", "expires_at:  (NIP-40)", "derived:  (derivation stamp)",
-     "content / msats / title:  (curated, per kind)"],
+     "content / msats / title:  (curated, per kind)", "name / display_name / nip05:  (kind 0)"],
     anchor="middle", size=14, gap=19,
 )
 

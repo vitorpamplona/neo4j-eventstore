@@ -102,16 +102,6 @@ class BulkCsvWriter(
             )
             newLine()
         }
-        // Keyed on the AUTHOR edge's target, as the online apply does (GraphDoc.authorKey).
-        val author = doc.authorKey
-        val props = doc.authorProps
-        if (props != null && author != null) {
-            out(USERS_NAMED, "pubkey:ID(User),name,display_name,nip05").apply {
-                write(listOf(q(author), q(props["name"]), q(props["display_name"]), q(props["nip05"])).joinToString(","))
-                newLine()
-            }
-        }
-
         for (edge in doc.edges) {
             val key = edge.target.key
             when (edge.target.kind) {
@@ -175,7 +165,7 @@ class BulkCsvWriter(
 
     /** The `neo4j-admin` arguments for the files written, in the order `--skip-duplicate-nodes` needs. */
     fun importArguments(pathPrefix: String): List<String> {
-        val nodes = listOf(STORED, STUBS, USERS_NAMED, USERS, ADDRESSES, TAGS).filter { it in files }
+        val nodes = listOf(STORED, STUBS, USERS, ADDRESSES, TAGS).filter { it in files }
         val rels = listOf(RELS_EVENT, RELS_USER, RELS_ADDRESS, RELS_TAG).filter { it in files }
         // The database name goes FIRST: `--relationships` takes a variable number of files and
         // would swallow a trailing positional argument as one more.
@@ -197,7 +187,6 @@ class BulkCsvWriter(
     companion object {
         const val STORED = "events_stored.csv"
         const val STUBS = "events_stub.csv"
-        const val USERS_NAMED = "users_named.csv"
         const val USERS = "users.csv"
         const val ADDRESSES = "addresses.csv"
         const val TAGS = "tags.csv"
@@ -221,6 +210,6 @@ class BulkCsvWriter(
 
         // Files without a `:LABEL` column get their label on the command line (events carry
         // theirs per row: held ones are Event;Stored, stubs just Event).
-        private val LABEL_OF = mapOf(USERS_NAMED to Labels.USER, USERS to Labels.USER, ADDRESSES to Labels.ADDRESS, TAGS to Labels.TAG)
+        private val LABEL_OF = mapOf(USERS to Labels.USER, ADDRESSES to Labels.ADDRESS, TAGS to Labels.TAG)
     }
 }

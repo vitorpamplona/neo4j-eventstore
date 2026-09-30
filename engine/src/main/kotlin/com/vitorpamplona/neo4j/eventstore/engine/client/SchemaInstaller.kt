@@ -109,7 +109,8 @@ class SchemaInstaller(
                 "CREATE INDEX stored_created_at IF NOT EXISTS FOR (n:${Labels.STORED}) ON (n.created_at)",
                 "CREATE INDEX stored_kind IF NOT EXISTS FOR (n:${Labels.STORED}) ON (n.kind)",
                 "CREATE INDEX stored_expires_at IF NOT EXISTS FOR (n:${Labels.STORED}) ON (n.expires_at)",
-                "CREATE INDEX user_nip05 IF NOT EXISTS FOR (n:${Labels.USER}) ON (n.nip05)",
+                // "Who is alice@example.com": NIP-05 names live on the kind 0 that states them.
+                "CREATE INDEX stored_nip05 IF NOT EXISTS FOR (n:${Labels.STORED}) ON (n.nip05)",
                 // "Every long-form article address", "every community": an address is keyed by
                 // its id, and without this a kind filter scans every address.
                 "CREATE INDEX address_kind IF NOT EXISTS FOR (n:${Labels.ADDRESS}) ON (n.kind)",

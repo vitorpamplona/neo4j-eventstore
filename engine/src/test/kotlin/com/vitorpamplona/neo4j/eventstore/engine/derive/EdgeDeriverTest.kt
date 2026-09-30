@@ -148,7 +148,11 @@ class EdgeDeriverTest {
             deriver.derive(
                 event(0, ALICE, content = """{"name":"alice","display_name":"Alice","nip05":"alice@example.com","about":"x"}"""),
             )
-        assertEquals(mapOf("name" to "alice", "display_name" to "Alice", "nip05" to "alice@example.com"), profile.authorProps)
+        assertEquals(
+            mapOf("name" to "alice", "display_name" to "Alice", "nip05" to "alice@example.com"),
+            profile.nodeProps.filterKeys { it in Extractors.PROFILE_FIELDS },
+            "a profile's names stay on the profile",
+        )
         assertEquals("🤙", deriver.derive(event(7, tags = listOf(listOf("e", hex("note"))), content = "🤙")).nodeProps["content"])
         assertEquals(21000L, deriver.derive(event(9734, CAROL, listOf(listOf("p", BOB), listOf("amount", "21000")))).nodeProps["msats"])
     }
